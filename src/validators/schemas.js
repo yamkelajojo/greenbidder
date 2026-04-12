@@ -21,6 +21,15 @@ export const registerSchema = z.object({
   role: z.enum(["buyer", "farmer"], { required_error: "Please select a role" }),
 });
 
+export const createListingSchema = z.object({
+  title: z.string().min(3, "Title must be at least 3 characters"),
+  description: z.string().optional(),
+  categoryId: z.string().uuid("Please select a category"),
+  price: z.number().positive("Price must be greater than 0"),
+  quantity: z.number().positive("Quantity must be greater than 0"),
+  unit: z.enum(["kg", "bag", "crate", "bunch", "each"]),
+});
+
 export const validate = (schema, data) => {
   const result = schema.safeParse(data);
   if (result.success) {

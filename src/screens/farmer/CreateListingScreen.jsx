@@ -18,6 +18,7 @@ import { pickImage, uploadListingImage } from "../../services/imageService";
 import { validate, createListingSchema } from "../../validators/schemas";
 import { supabase } from "../../config/supabase";
 import { colors, spacing, fonts, radius } from "../../config/theme";
+import { analyseAndSave } from "../../services/aiService";
 
 /**
  * Create Listing screen — farmer creates a new produce listing.
@@ -145,12 +146,12 @@ export default function CreateListingScreen({ navigation }) {
 
     if (!result.success) {
       setErrors(result.errors);
-      Alert.alert("Validation failed", JSON.stringify(result.errors));
       return;
     }
 
     setIsLoading(true);
     try {
+      // Step 1: Create the listing
       const listingData = {
         farmer_id: farmerProfileId,
         category_id: categoryId,
@@ -163,23 +164,72 @@ export default function CreateListingScreen({ navigation }) {
       };
 
       if (location) {
-        listingData.location = `POINT(${location.lng} ${location.lat})`;
+        listingData.location_name = `${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`;
       }
 
-      Alert.alert("Success", "Your listing is now live!", [
-        {
-          text: "OK",
-          onPress: () => {
-            setTitle("");
-            setDescription("");
-            setPrice("");
-            setQuantity("");
-            setCategoryId(null);
-            setImageUri(null);
-            navigation.goBack();
-          },
+      const { data: listing, error: listingError } =
+        await createListing(listingData);
+
+      if (listingError) {
+        setApiError(listingError.message || "Failed to create listing.");
+        return;
+      }
+
+      // Step 2: Upload image
+      const { url, error: imageError } = await uploadListingImage(
+        imageUri,
+        listing.id,
+      );
+
+      if (imageError) {
+        console.warn("Image upload failed:", imageError.message);
+      }
+
+      // Step 3: Save image URL to listing_images table
+      if (url) {
+        await supabase.from("listing_images").insert({
+          listing_id: listing.id,
+          image_url: url,
+          is_primary: true,
+        });
+      }
+
+      // Step 4: AI analysis (runs in background, doesn't block)
+      const categoryName =
+        categories.find((c) => c.id === categoryId)?.name || "produce";
+      analyseAndSave(imageUri, listing.id, categoryName).then(
+        ({ analysis, error: aiError }) => {
+          if (analysis) {
+            console.log(
+              "AI analysis complete:",
+              analysis.condition_score + "/10",
+            );
+          }
+          if (aiError) {
+            console.warn("AI analysis skipped:", aiError);
+          }
         },
-      ]);
+      );
+
+      // Success
+      Alert.alert(
+        "Success",
+        "Your listing is now live! AI analysis is running in the background.",
+        [
+          {
+            text: "OK",
+            onPress: () => {
+              setTitle("");
+              setDescription("");
+              setPrice("");
+              setQuantity("");
+              setCategoryId(null);
+              setImageUri(null);
+              navigation.goBack();
+            },
+          },
+        ],
+      );
     } catch (err) {
       Alert.alert("Catch Error", err.message);
       setApiError(err.message);
@@ -187,7 +237,6 @@ export default function CreateListingScreen({ navigation }) {
       setIsLoading(false);
     }
   };
-
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView

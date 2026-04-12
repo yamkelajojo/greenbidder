@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  lint-and-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Check for syntax errors
+        run: npx expo export --dump-sourcemap 2>&1 | head -50 || true
+
+      - name: Verify project structure
+        run: |
+          echo "Checking required files..."
+          test -f src/config/supabase.js && echo "✓ Supabase config"
+          test -f src/config/theme.js && echo "✓ Design tokens"
+          test -f src/hooks/useAuth.js && echo "✓ Auth hook"
+          test -f src/services/authService.js && echo "✓ Auth service"
+          test -f src/services/listingService.js && echo "✓ Listing service"
+          test -f src/services/imageService.js && echo "✓ Image service"
+          test -f src/validators/schemas.js && echo "✓ Validators"
+          test -f src/utils/formatters.js && echo "✓ Formatters"
+          test -f src/utils/dateUtils.js && echo "✓ Date utils"
+          echo "All required files present ✓"

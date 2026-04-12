@@ -1,20 +1,25 @@
-import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import React from "react";
+import { TamaguiProvider, Theme } from "tamagui";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import config from "./src/config/tamagui.config";
+import { AuthProvider } from "./src/hooks/useAuth";
+import RootNavigator from "./src/navigation/RootNavigator";
 
+/**
+ * App entry point.
+ * Provider hierarchy (outermost to innermost):
+ *   SafeAreaProvider → TamaguiProvider → AuthProvider → RootNavigator
+ */
 export default function App() {
   return (
-    <View style={styles.container}>
-      <Text>Open up App.js to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <SafeAreaProvider>
+      <TamaguiProvider config={config}>
+        <Theme name="light">
+          <AuthProvider>
+            <RootNavigator />
+          </AuthProvider>
+        </Theme>
+      </TamaguiProvider>
+    </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

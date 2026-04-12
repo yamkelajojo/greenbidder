@@ -11,6 +11,7 @@ import ListingDetailScreen from "../screens/shared/ListingDetailScreen";
 // Farmer screens
 import FarmerListingsScreen from "../screens/farmer/FarmerListingsScreen";
 import CreateListingScreen from "../screens/farmer/CreateListingScreen";
+import EditListingScreen from "../screens/farmer/EditListingScreen";
 
 // Shared screens
 import MarketPricesScreen from "../screens/shared/MarketPricesScreen";
@@ -48,6 +49,7 @@ function ListingsStackScreen() {
         name="ListingDetail"
         component={ListingDetailScreen}
       />
+      <ListingsStack.Screen name="EditListing" component={EditListingScreen} />
     </ListingsStack.Navigator>
   );
 }

@@ -30,6 +30,14 @@ export const createListingSchema = z.object({
   unit: z.enum(["kg", "bag", "crate", "bunch", "each"]),
 });
 
+export const editListingSchema = z.object({
+  title: z.string().min(3, "Title must be at least 3 characters"),
+  description: z.string().optional(),
+  price: z.number().positive("Price must be greater than 0"),
+  quantity: z.number().positive("Quantity must be greater than 0"),
+  unit: z.enum(["kg", "bag", "crate", "bunch", "each"]),
+});
+
 export const validate = (schema, data) => {
   const result = schema.safeParse(data);
   if (result.success) {

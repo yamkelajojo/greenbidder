@@ -29,7 +29,7 @@ export default function FarmerListingsScreen({ navigation }) {
   useFocusEffect(
     useCallback(() => {
       loadListings();
-    }, [user])
+    }, [user]),
   );
 
   /**
@@ -61,11 +61,13 @@ export default function FarmerListingsScreen({ navigation }) {
       // Fetch listings with related data in one query — avoids N+1
       const { data, error } = await supabase
         .from("listings")
-        .select(`
+        .select(
+          `
           id, title, price, unit, quantity, status, created_at,
           produce_categories ( name ),
           listing_images ( image_url, is_primary )
-        `)
+        `,
+        )
         .eq("farmer_id", farmerData.id)
         .neq("status", "archived")
         .order("created_at", { ascending: false });
@@ -80,12 +82,15 @@ export default function FarmerListingsScreen({ navigation }) {
 
   const renderListing = ({ item }) => {
     const primaryImage = item.listing_images?.find((img) => img.is_primary);
-    const imageUrl = primaryImage?.image_url || item.listing_images?.[0]?.image_url;
+    const imageUrl =
+      primaryImage?.image_url || item.listing_images?.[0]?.image_url;
 
     return (
       <TouchableOpacity
         style={styles.card}
-        onPress={() => navigation.navigate("ListingDetail", { listingId: item.id })}
+        onPress={() =>
+          navigation.navigate("EditListing", { listingId: item.id })
+        }
         activeOpacity={0.8}
       >
         {imageUrl ? (
@@ -96,7 +101,9 @@ export default function FarmerListingsScreen({ navigation }) {
           </View>
         )}
         <View style={styles.cardContent}>
-          <Text style={styles.cardTitle} numberOfLines={1}>{item.title}</Text>
+          <Text style={styles.cardTitle} numberOfLines={1}>
+            {item.title}
+          </Text>
           <Text style={styles.cardCategory}>
             {item.produce_categories?.name}
           </Text>
@@ -106,14 +113,22 @@ export default function FarmerListingsScreen({ navigation }) {
             </Text>
             <Text style={styles.cardTime}>{timeAgo(item.created_at)}</Text>
           </View>
-          <View style={[
-            styles.statusBadge,
-            item.status === "active" ? styles.statusActive : styles.statusInactive,
-          ]}>
-            <Text style={[
-              styles.statusText,
-              item.status === "active" ? styles.statusTextActive : styles.statusTextInactive,
-            ]}>
+          <View
+            style={[
+              styles.statusBadge,
+              item.status === "active"
+                ? styles.statusActive
+                : styles.statusInactive,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                item.status === "active"
+                  ? styles.statusTextActive
+                  : styles.statusTextInactive,
+              ]}
+            >
               {item.status}
             </Text>
           </View>
@@ -178,7 +193,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
   },
-  createButtonText: { color: "#fff", fontWeight: "600", fontSize: fonts.caption },
+  createButtonText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: fonts.caption,
+  },
   loader: { flex: 1, justifyContent: "center", alignItems: "center" },
   list: { padding: spacing.md },
   card: {
@@ -197,10 +216,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  cardImagePlaceholderText: { color: colors.textTertiary, fontSize: fonts.caption },
+  cardImagePlaceholderText: {
+    color: colors.textTertiary,
+    fontSize: fonts.caption,
+  },
   cardContent: { padding: spacing.md },
-  cardTitle: { fontSize: fonts.body, fontWeight: "600", color: colors.textPrimary },
-  cardCategory: { fontSize: fonts.small, color: colors.textSecondary, marginTop: 2 },
+  cardTitle: {
+    fontSize: fonts.body,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
+  cardCategory: {
+    fontSize: fonts.small,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
   cardRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -223,7 +253,11 @@ const styles = StyleSheet.create({
   statusTextInactive: { color: colors.textSecondary },
   empty: { alignItems: "center", paddingTop: spacing.xxl, padding: spacing.lg },
   emptyIcon: { fontSize: 48, marginBottom: spacing.md },
-  emptyTitle: { fontSize: fonts.h2, fontWeight: "600", color: colors.textPrimary },
+  emptyTitle: {
+    fontSize: fonts.h2,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
   emptyText: {
     fontSize: fonts.caption,
     color: colors.textSecondary,

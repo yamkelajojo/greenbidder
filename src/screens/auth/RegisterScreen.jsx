@@ -12,7 +12,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { registerUser } from "../../services/authService";
-import { createFarmerProfile, createBuyerProfile } from "../../services/profileService";
+import {
+  createFarmerProfile,
+  createBuyerProfile,
+} from "../../services/profileService";
 import { validate, registerSchema } from "../../validators/schemas";
 import { colors, spacing, fonts, radius } from "../../config/theme";
 import { supabase } from "../../config/supabase";
@@ -36,7 +39,12 @@ export default function RegisterScreen({ navigation }) {
     setApiError("");
 
     // Criterion 4 — validate all input before sending
-    const result = validate(registerSchema, { fullName, email, password, role });
+    const result = validate(registerSchema, {
+      fullName,
+      email,
+      password,
+      role,
+    });
     if (!result.success) {
       setErrors(result.errors);
       return;
@@ -56,7 +64,9 @@ export default function RegisterScreen({ navigation }) {
         if (error.message?.includes("already registered")) {
           setApiError("This email is already registered. Try logging in.");
         } else {
-          setApiError(error.message || "Registration failed. Please try again.");
+          setApiError(
+            error.message || "Registration failed. Please try again.",
+          );
         }
         return;
       }
@@ -69,16 +79,26 @@ export default function RegisterScreen({ navigation }) {
         return;
       }
 
-      // Fetch our app user id (not auth id) from the users table
-      const { data: userData, error: userError } = await supabase
-        .from("users")
-        .select("id")
-        .eq("auth_id", userId)
-        .single();
+      // Small delay to let the auth trigger create the users row
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      if (userError || !userData) {
-        // User row might not exist yet due to trigger timing — this is okay
-        // They can create their profile on first login
+      // Fetch our app user id (not auth id) from the users table
+      let userData = null;
+      let retries = 3;
+      while (retries > 0 && !userData) {
+        const { data: row } = await supabase
+          .from("users")
+          .select("id")
+          .eq("auth_id", userId)
+          .single();
+        userData = row;
+        if (!userData) {
+          retries--;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      }
+
+      if (!userData) {
         console.warn("Profile creation deferred — user row not yet available");
         return;
       }
@@ -341,7 +361,11 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.6 },
   buttonText: { color: "#fff", fontSize: fonts.body, fontWeight: "600" },
-  linkButton: { alignItems: "center", marginTop: spacing.lg, paddingBottom: spacing.xl },
+  linkButton: {
+    alignItems: "center",
+    marginTop: spacing.lg,
+    paddingBottom: spacing.xl,
+  },
   linkText: { fontSize: fonts.caption, color: colors.textSecondary },
   linkBold: { color: colors.primary, fontWeight: "600" },
 });

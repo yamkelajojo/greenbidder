@@ -45,6 +45,16 @@ export default function ListingDetailScreen({ route, navigation }) {
     };
   }, [listingId]);
 
+  const loadListing = async () => {
+    setIsLoading(true);
+    const { data, error } = await getListingById(listingId);
+    if (data) {
+      setListing(data);
+      if (isBuyer) checkIfSaved();
+    }
+    setIsLoading(false);
+  };
+
   /**
    * Check if buyer has saved this listing.
    * Criterion 3 — count query instead of fetching full rows.
@@ -225,6 +235,7 @@ export default function ListingDetailScreen({ route, navigation }) {
           {/* AI Analysis card */}
           {ai ? (
             <View style={styles.aiCard}>
+              {/* Header: title + score */}
               <View style={styles.aiHeader}>
                 <Text style={styles.aiTitle}>AI Quality Analysis</Text>
                 <View style={styles.aiScoreBadge}>
@@ -233,19 +244,111 @@ export default function ListingDetailScreen({ route, navigation }) {
                   </Text>
                 </View>
               </View>
-              {ai.ripeness_estimate ? (
-                <Text style={styles.aiDetail}>
-                  Ripeness: {ai.ripeness_estimate}
-                </Text>
+
+              {/* Confidence indicator — only shows when not high */}
+              {ai.raw_feedback?.confidence_level &&
+              ai.raw_feedback.confidence_level !== "high" ? (
+                <View style={styles.aiConfidence}>
+                  <Text style={styles.aiConfidenceText}>
+                    ⚠{" "}
+                    {ai.raw_feedback.confidence_level === "low"
+                      ? "Limited image quality — estimates are approximate"
+                      : "Some uncertainty in this assessment"}
+                  </Text>
+                </View>
               ) : null}
+
+              {/* Variety + Harvest readiness */}
+              <View style={styles.aiKeyInfo}>
+                {ai.raw_feedback?.variety_identified ? (
+                  <Text style={styles.aiVariety}>
+                    {ai.raw_feedback.variety_identified}
+                  </Text>
+                ) : null}
+                {ai.raw_feedback?.harvest_readiness ? (
+                  <View
+                    style={[
+                      styles.aiHarvestBadge,
+                      ai.raw_feedback.harvest_readiness === "ready" &&
+                        styles.harvestReady,
+                      ai.raw_feedback.harvest_readiness === "soon" &&
+                        styles.harvestSoon,
+                      ai.raw_feedback.harvest_readiness === "not yet" &&
+                        styles.harvestNotYet,
+                      ai.raw_feedback.harvest_readiness === "overdue" &&
+                        styles.harvestOverdue,
+                    ]}
+                  >
+                    <Text style={styles.aiHarvestText}>
+                      {ai.raw_feedback.harvest_readiness === "ready"
+                        ? "✓ Ready to sell"
+                        : ai.raw_feedback.harvest_readiness === "soon"
+                          ? "◐ Almost ready"
+                          : ai.raw_feedback.harvest_readiness === "not yet"
+                            ? "○ Not yet"
+                            : "⚠ Overdue — sell now"}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Ripeness + Shelf life row */}
+              <View style={styles.aiStatsRow}>
+                {ai.ripeness_estimate ? (
+                  <View style={styles.aiStat}>
+                    <Text style={styles.aiStatLabel}>Ripeness</Text>
+                    <Text style={styles.aiStatValue}>
+                      {ai.ripeness_estimate}
+                    </Text>
+                  </View>
+                ) : null}
+                {ai.raw_feedback?.shelf_life_days != null ? (
+                  <View style={styles.aiStat}>
+                    <Text style={styles.aiStatLabel}>Shelf Life</Text>
+                    <Text style={styles.aiStatValue}>
+                      ~{ai.raw_feedback.shelf_life_days} days
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Growth insight */}
               {ai.growth_insight ? (
-                <Text style={styles.aiDetail}>{ai.growth_insight}</Text>
+                <Text style={styles.aiInsight}>{ai.growth_insight}</Text>
               ) : null}
-              {ai.price_suggestion_min && ai.price_suggestion_max ? (
-                <Text style={styles.aiPrice}>
-                  Suggested price: {formatZAR(ai.price_suggestion_min)} –{" "}
-                  {formatZAR(ai.price_suggestion_max)}
+
+              {/* Storage tip */}
+              {ai.raw_feedback?.storage_advice ? (
+                <View style={styles.aiTip}>
+                  <Text style={styles.aiTipText}>
+                    💡 {ai.raw_feedback.storage_advice}
+                  </Text>
+                </View>
+              ) : null}
+
+              {/* Seasonal note */}
+              {ai.raw_feedback?.seasonal_note ? (
+                <Text style={styles.aiSeasonal}>
+                  📅 {ai.raw_feedback.seasonal_note}
                 </Text>
+              ) : null}
+
+              {/* Price range + market insight */}
+              {ai.price_suggestion_min && ai.price_suggestion_max ? (
+                <View style={styles.aiPriceSection}>
+                  <View style={styles.aiPriceRow}>
+                    <Text style={styles.aiPriceLabel}>AI Price Range</Text>
+                    <Text style={styles.aiPriceValue}>
+                      {formatZAR(ai.price_suggestion_min)} –{" "}
+                      {formatZAR(ai.price_suggestion_max)}
+                    </Text>
+                  </View>
+                  {ai.raw_feedback?.market_insight ? (
+                    <Text style={styles.aiMarket}>
+                      {ai.raw_feedback.market_insight}
+                    </Text>
+                  ) : null}
+                </View>
               ) : null}
             </View>
           ) : null}
@@ -493,5 +596,110 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: fonts.body,
     fontWeight: "600",
+  },
+  aiKeyInfo: {
+    marginBottom: spacing.md,
+  },
+  aiVariety: {
+    fontSize: fonts.body,
+    fontWeight: "600",
+    color: colors.aiBadge,
+    marginBottom: spacing.xs,
+  },
+  aiHarvestBadge: {
+    alignSelf: "flex-start",
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    marginTop: spacing.xs,
+  },
+  harvestReady: { backgroundColor: colors.primaryLight },
+  harvestSoon: { backgroundColor: "#FFF3CD" },
+  harvestNotYet: { backgroundColor: colors.backgroundTertiary },
+  harvestOverdue: { backgroundColor: "#FEE2E2" },
+  aiHarvestText: {
+    fontSize: fonts.caption,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
+  aiConfidence: {
+    backgroundColor: "#FFF8E1",
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  aiConfidenceText: {
+    fontSize: fonts.small,
+    color: "#B8860B",
+  },
+  aiStatsRow: {
+    flexDirection: "row",
+    marginBottom: spacing.md,
+  },
+  aiStat: {
+    flex: 1,
+    backgroundColor: colors.aiBadge + "08",
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    marginRight: spacing.sm,
+  },
+  aiStatLabel: {
+    fontSize: 10,
+    color: colors.textTertiary,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+  aiStatValue: {
+    fontSize: fonts.caption,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
+  aiInsight: {
+    fontSize: fonts.caption,
+    color: colors.textPrimary,
+    lineHeight: 20,
+    marginBottom: spacing.sm,
+  },
+  aiTip: {
+    backgroundColor: colors.aiBadge + "10",
+    borderRadius: radius.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  aiTipText: {
+    fontSize: fonts.small,
+    color: colors.textPrimary,
+    lineHeight: 18,
+  },
+  aiSeasonal: {
+    fontSize: fonts.small,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+  },
+  aiPriceSection: {
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.aiBadge + "20",
+  },
+  aiPriceRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  aiPriceLabel: {
+    fontSize: fonts.small,
+    color: colors.textSecondary,
+  },
+  aiPriceValue: {
+    fontSize: fonts.body,
+    fontWeight: "700",
+    color: colors.aiBadge,
+  },
+  aiMarket: {
+    fontSize: fonts.small,
+    color: colors.textSecondary,
+    fontStyle: "italic",
+    marginTop: spacing.xs,
   },
 });

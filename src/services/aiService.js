@@ -1,28 +1,26 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { supabase } from "../config/supabase";
 
-const GEMINI_API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY || "";
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+const AI_API_KEY = process.env.EXPO_PUBLIC_AI_API_KEY || "";
+const AI_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 /**
- * AI Analysis service — analyses produce images using Gemini Vision.
+ * AI Analysis service — analyses produce images using Groq + Llama Vision.
  * Criterion 2 — Service Layer. Criterion 6 — Single Responsibility.
  */
 
 /**
- * Analyses a produce image using Gemini Vision API.
- * Sends the image as base64, receives structured quality assessment.
+ * Analyses a produce image using Llama Vision via Groq.
  * @param {string} imageUri - Local file URI of the produce image
  * @param {string} produceType - Category name e.g. "Tomatoes"
  * @returns {Promise<{analysis: Object|null, error: string|null}>}
  */
 export const analyseProduceImage = async (imageUri, produceType) => {
   try {
-    if (!GEMINI_API_KEY) {
-      return { analysis: null, error: "Gemini API key not configured" };
+    if (!AI_API_KEY) {
+      return { analysis: null, error: "AI API key not configured" };
     }
 
-    // Read image as base64
     const base64 = await FileSystem.readAsStringAsync(imageUri, {
       encoding: "base64",
     });
@@ -41,46 +39,52 @@ Analyse this image of ${produceType} and return a JSON object with exactly these
 Base prices on current South African market rates for ${produceType}.
 Return ONLY the JSON object, no markdown, no backticks, no explanation.`;
 
-    const response = await fetch(GEMINI_URL, {
+    const response = await fetch(AI_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${AI_API_KEY}`,
+      },
       body: JSON.stringify({
-        contents: [
+        model: "meta-llama/llama-4-scout-17b-16e-instruct",
+        messages: [
           {
-            parts: [
+            role: "user",
+            content: [
               {
-                inlineData: {
-                  mimeType: "image/jpeg",
-                  data: base64,
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${base64}`,
                 },
               },
-              { text: prompt },
+              {
+                type: "text",
+                text: prompt,
+              },
             ],
           },
         ],
+        temperature: 0.3,
+        max_tokens: 500,
       }),
     });
 
     if (!response.ok) {
       const errText = await response.text();
-      if (response.status === 429) {
-        return {
-          analysis: null,
-          error: "AI is busy. Analysis will retry later.",
-        };
-      }
-      return { analysis: null, error: "AI analysis failed. Please try again." };
+      return {
+        analysis: null,
+        error: `AI error (${response.status}): ${errText.substring(0, 200)}`,
+      };
     }
 
     const data = await response.json();
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const text = data?.choices?.[0]?.message?.content;
 
     if (!text) {
       return { analysis: null, error: "AI returned empty response." };
     }
 
-    // Parse JSON — strip any markdown fences if present
-    const cleaned = text.replace(/json|/g, "").trim();
+    const cleaned = text.replace(/```json|```/g, "").trim();
     const analysis = JSON.parse(cleaned);
 
     return { analysis, error: null };
@@ -119,7 +123,6 @@ export const saveAnalysis = async (listingId, analysis) => {
 
 /**
  * Full pipeline — analyse image and save results.
- * Called after a listing is created and image uploaded.
  * @param {string} imageUri - Local image URI
  * @param {string} listingId - UUID of the listing
  * @param {string} produceType - Category name

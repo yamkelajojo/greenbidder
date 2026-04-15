@@ -17,6 +17,7 @@ import { supabase } from "../../config/supabase";
 import { formatZAR } from "../../utils/formatters";
 import { timeAgo } from "../../utils/dateUtils";
 import { colors, spacing, fonts, radius } from "../../config/theme";
+import { trackView, trackContact } from "../../services/trackingService";
 
 /**
  * Listing detail screen — full view of a single listing.
@@ -25,7 +26,7 @@ import { colors, spacing, fonts, radius } from "../../config/theme";
  */
 export default function ListingDetailScreen({ route, navigation }) {
   const { listingId } = route.params;
-  const { user, isBuyer } = useAuth();
+  const { user, isBuyer, profileId } = useAuth();
 
   const [listing, setListing] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -33,17 +34,16 @@ export default function ListingDetailScreen({ route, navigation }) {
 
   useEffect(() => {
     loadListing();
-  }, [listingId]);
+    const viewStart = Date.now();
 
-  const loadListing = async () => {
-    setIsLoading(true);
-    const { data, error } = await getListingById(listingId);
-    if (data) {
-      setListing(data);
-      if (isBuyer) checkIfSaved();
-    }
-    setIsLoading(false);
-  };
+    // When the buyer leaves this screen, record how long they viewed
+    return () => {
+      if (isBuyer && profileId) {
+        const seconds = (Date.now() - viewStart) / 1000;
+        trackView(profileId, listingId, seconds, "feed");
+      }
+    };
+  }, [listingId]);
 
   /**
    * Check if buyer has saved this listing.
@@ -116,15 +116,31 @@ export default function ListingDetailScreen({ route, navigation }) {
   const handleContact = () => {
     const phone = listing?.farmer_profiles?.phone;
     if (phone) {
-      Alert.alert("Contact Farmer", `Call ${listing.farmer_profiles.farm_name}?`, [
-        { text: "Cancel", style: "cancel" },
-        { text: "Call", onPress: () => Linking.openURL(`tel:${phone}`) },
-        {
-          text: "WhatsApp",
-          onPress: () =>
-            Linking.openURL(`whatsapp://send?phone=${phone}&text=Hi, I'm interested in your ${listing.title} on GreenBidder`),
-        },
-      ]);
+      Alert.alert(
+        "Contact Farmer",
+        `Call ${listing.farmer_profiles.farm_name}?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Call",
+            onPress: () => {
+              if (isBuyer && profileId)
+                trackContact(profileId, listingId, "phone");
+              Linking.openURL(`tel:${phone}`);
+            },
+          },
+          {
+            text: "WhatsApp",
+            onPress: () => {
+              if (isBuyer && profileId)
+                trackContact(profileId, listingId, "whatsapp");
+              Linking.openURL(
+                `whatsapp://send?phone=${phone}&text=Hi, I'm interested in your ${listing.title} on GreenBidder`,
+              );
+            },
+          },
+        ],
+      );
     } else {
       Alert.alert("Contact", "This farmer hasn't added a phone number yet.");
     }
@@ -151,7 +167,8 @@ export default function ListingDetailScreen({ route, navigation }) {
   }
 
   const primaryImage = listing.listing_images?.find((img) => img.is_primary);
-  const imageUrl = primaryImage?.image_url || listing.listing_images?.[0]?.image_url;
+  const imageUrl =
+    primaryImage?.image_url || listing.listing_images?.[0]?.image_url;
   const ai = listing.ai_analysis;
 
   return (
@@ -238,7 +255,8 @@ export default function ListingDetailScreen({ route, navigation }) {
             <View style={styles.farmerRow}>
               <View style={styles.farmerAvatar}>
                 <Text style={styles.farmerAvatarText}>
-                  {listing.farmer_profiles?.farm_name?.[0]?.toUpperCase() || "F"}
+                  {listing.farmer_profiles?.farm_name?.[0]?.toUpperCase() ||
+                    "F"}
                 </Text>
               </View>
               <View style={styles.farmerInfo}>
@@ -309,7 +327,11 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
   },
-  backText: { fontSize: fonts.caption, fontWeight: "600", color: colors.textPrimary },
+  backText: {
+    fontSize: fonts.caption,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
   image: { width: "100%", height: 280 },
   imagePlaceholder: {
     width: "100%",
@@ -338,7 +360,11 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radius.full,
   },
-  organicText: { fontSize: fonts.small, color: colors.primaryDark, fontWeight: "600" },
+  organicText: {
+    fontSize: fonts.small,
+    color: colors.primaryDark,
+    fontWeight: "600",
+  },
   title: {
     fontSize: fonts.h1,
     fontWeight: "700",
@@ -412,7 +438,11 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
   },
   farmerInfo: { flex: 1 },
-  farmerName: { fontSize: fonts.body, fontWeight: "600", color: colors.textPrimary },
+  farmerName: {
+    fontSize: fonts.body,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
   farmerRating: {
     fontSize: fonts.caption,
     color: colors.warning,

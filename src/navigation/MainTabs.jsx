@@ -1,7 +1,7 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Home, BarChart3, PlusCircle, User } from "lucide-react-native";
+import { Home, BarChart3, PlusCircle, User, Heart } from "lucide-react-native";
 import { useAuth } from "../hooks/useAuth";
 import { colors } from "../config/theme";
 
@@ -17,6 +17,7 @@ import EditListingScreen from "../screens/farmer/EditListingScreen";
 // Shared screens
 import MarketPricesScreen from "../screens/shared/MarketPricesScreen";
 import ProfileScreen from "../screens/shared/ProfileScreen";
+import SavedListingsScreen from "../screens/buyer/SavedListingsScreen";
 
 const Tab = createBottomTabNavigator();
 const FeedStack = createNativeStackNavigator();
@@ -109,6 +110,18 @@ export default function MainTabs() {
           ),
         }}
       />
+      {!isFarmer ? (
+        <Tab.Screen
+          name="Saved"
+          component={SavedListingsScreen}
+          options={{
+            tabBarLabel: "Saved",
+            tabBarIcon: ({ color, size }) => (
+              <Heart color={color} size={size} />
+            ),
+          }}
+        />
+      ) : null}
       {isFarmer ? (
         <Tab.Screen
           name="Listings"

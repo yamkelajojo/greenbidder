@@ -1,8 +1,9 @@
 import React from "react";
+import { View, Text, StyleSheet } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Home, BarChart3, PlusCircle, User } from "@tamagui/lucide-icons-2";
 import { useAuth } from "../hooks/useAuth";
+import { colors, fonts, spacing } from "../config/theme";
 
 // Buyer screens
 import BuyerFeedScreen from "../screens/buyer/BuyerFeedScreen";
@@ -20,10 +21,7 @@ import ProfileScreen from "../screens/shared/ProfileScreen";
 const Tab = createBottomTabNavigator();
 const FeedStack = createNativeStackNavigator();
 const ListingsStack = createNativeStackNavigator();
-const PricesStack = createNativeStackNavigator();
-const ProfileStack = createNativeStackNavigator();
 
-/** Buyer: Feed → Listing Detail */
 function FeedStackScreen() {
   return (
     <FeedStack.Navigator screenOptions={{ headerShown: false }}>
@@ -33,7 +31,6 @@ function FeedStackScreen() {
   );
 }
 
-/** Farmer: My Listings → Create Listing */
 function ListingsStackScreen() {
   return (
     <ListingsStack.Navigator screenOptions={{ headerShown: false }}>
@@ -54,30 +51,6 @@ function ListingsStackScreen() {
   );
 }
 
-/** Market Prices (shared) */
-function PricesStackScreen() {
-  return (
-    <PricesStack.Navigator screenOptions={{ headerShown: false }}>
-      <PricesStack.Screen name="PricesHome" component={MarketPricesScreen} />
-    </PricesStack.Navigator>
-  );
-}
-
-/** Profile (shared) */
-function ProfileStackScreen() {
-  return (
-    <ProfileStack.Navigator screenOptions={{ headerShown: false }}>
-      <ProfileStack.Screen name="ProfileHome" component={ProfileScreen} />
-    </ProfileStack.Navigator>
-  );
-}
-
-/**
- * Main tab bar — 4 tabs.
- * Tab 1 and Tab 3 are role-aware:
- *   Buyer sees "Feed" + "Browse"
- *   Farmer sees "Feed" + "Create"
- */
 export default function MainTabs() {
   const { userRole } = useAuth();
   const isFarmer = userRole === "farmer";
@@ -86,53 +59,44 @@ export default function MainTabs() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#2D6A4F",
-        tabBarInactiveTintColor: "#ADB5BD",
-        tabBarStyle: {
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 4,
-        },
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: "500",
-        },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textTertiary,
+        tabBarStyle: { height: 60, paddingBottom: 8, paddingTop: 4 },
+        tabBarLabelStyle: { fontSize: 12, fontWeight: "500" },
       }}
     >
       <Tab.Screen
         name="Feed"
         component={FeedStackScreen}
         options={{
-          tabBarIcon: ({ color, size }) => <Home color={color} size={size} />,
           tabBarLabel: "Feed",
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>🏠</Text>,
         }}
       />
       <Tab.Screen
         name="Prices"
-        component={PricesStackScreen}
+        component={MarketPricesScreen}
         options={{
-          tabBarIcon: ({ color, size }) => (
-            <BarChart3 color={color} size={size} />
-          ),
           tabBarLabel: "Prices",
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>📊</Text>,
         }}
       />
-      <Tab.Screen
-        name="Listings"
-        component={ListingsStackScreen}
-        options={{
-          tabBarIcon: ({ color, size }) => (
-            <PlusCircle color={color} size={size} />
-          ),
-          tabBarLabel: isFarmer ? "Create" : "Browse",
-        }}
-      />
+      {isFarmer ? (
+        <Tab.Screen
+          name="Listings"
+          component={ListingsStackScreen}
+          options={{
+            tabBarLabel: "Create",
+            tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>➕</Text>,
+          }}
+        />
+      ) : null}
       <Tab.Screen
         name="Profile"
-        component={ProfileStackScreen}
+        component={ProfileScreen}
         options={{
-          tabBarIcon: ({ color, size }) => <User color={color} size={size} />,
           tabBarLabel: "Profile",
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20 }}>👤</Text>,
         }}
       />
     </Tab.Navigator>

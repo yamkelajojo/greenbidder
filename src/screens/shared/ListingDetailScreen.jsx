@@ -18,6 +18,10 @@ import { formatZAR } from "../../utils/formatters";
 import { timeAgo } from "../../utils/dateUtils";
 import { colors, spacing, fonts, radius } from "../../config/theme";
 import { trackView, trackContact } from "../../services/trackingService";
+import { Modal } from "react-native";
+import ReviewSheet from "../../components/shared/ReviewSheet";
+import FarmerTrustCard from "../../components/shared/FarmerTrustCard";
+import { hasReviewed } from "../../services/reviewService";
 
 /**
  * Listing detail screen — full view of a single listing.
@@ -31,6 +35,9 @@ export default function ListingDetailScreen({ route, navigation }) {
   const [listing, setListing] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaved, setIsSaved] = useState(false);
+
+  const [showReview, setShowReview] = useState(false);
+  const [alreadyReviewed, setAlreadyReviewed] = useState(false);
 
   useEffect(() => {
     loadListing();
@@ -51,6 +58,12 @@ export default function ListingDetailScreen({ route, navigation }) {
     if (data) {
       setListing(data);
       if (isBuyer) checkIfSaved();
+
+      if (isBuyer && profileId && data.farmer_profiles?.id) {
+        hasReviewed(profileId, data.farmer_profiles.id).then(
+          setAlreadyReviewed,
+        );
+      }
     }
     setIsLoading(false);
   };
@@ -353,7 +366,7 @@ export default function ListingDetailScreen({ route, navigation }) {
             </View>
           ) : null}
 
-          {/* Farmer info card */}
+          {/* Farmer info + trust card */}
           <View style={styles.farmerCard}>
             <View style={styles.farmerRow}>
               <View style={styles.farmerAvatar}>
@@ -367,19 +380,19 @@ export default function ListingDetailScreen({ route, navigation }) {
                   {listing.farmer_profiles?.farm_name}
                   {listing.farmer_profiles?.is_verified ? " ✓" : ""}
                 </Text>
-                {listing.farmer_profiles?.avg_rating > 0 ? (
-                  <Text style={styles.farmerRating}>
-                    ★ {listing.farmer_profiles.avg_rating}
+                {listing.farmer_profiles?.location_name ? (
+                  <Text style={styles.farmerLocation}>
+                    📍 {listing.farmer_profiles.location_name}
                   </Text>
                 ) : null}
               </View>
             </View>
-            {listing.farmer_profiles?.location_name ? (
-              <Text style={styles.farmerLocation}>
-                📍 {listing.farmer_profiles.location_name}
-              </Text>
-            ) : null}
           </View>
+
+          {/* Trust breakdown */}
+          {listing.farmer_profiles?.id ? (
+            <FarmerTrustCard farmerProfileId={listing.farmer_profiles.id} />
+          ) : null}
 
           {/* Meta info */}
           <View style={styles.metaRow}>
@@ -412,6 +425,40 @@ export default function ListingDetailScreen({ route, navigation }) {
           </TouchableOpacity>
         </View>
       ) : null}
+      {/* Review button — only for buyers who haven't reviewed yet */}
+      {isBuyer && listing.farmer_profiles?.id && !alreadyReviewed ? (
+        <TouchableOpacity
+          style={styles.reviewButton}
+          onPress={() => setShowReview(true)}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.reviewButtonText}>⭐ Rate this farmer</Text>
+        </TouchableOpacity>
+      ) : null}
+
+      {/* Review modal */}
+      <Modal
+        visible={showReview}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <ReviewSheet
+          buyerProfileId={profileId}
+          farmerProfileId={listing?.farmer_profiles?.id}
+          farmerName={listing?.farmer_profiles?.farm_name || "This farmer"}
+          listingId={listingId}
+          listingTitle={listing?.title}
+          onComplete={() => {
+            setShowReview(false);
+            setAlreadyReviewed(true);
+            Alert.alert(
+              "Thank you!",
+              "Your review helps other buyers make better decisions.",
+            );
+          }}
+          onCancel={() => setShowReview(false)}
+        />
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -701,5 +748,21 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
     fontStyle: "italic",
     marginTop: spacing.xs,
+  },
+  reviewButton: {
+    margin: spacing.md,
+    marginTop: 0,
+    height: 44,
+    backgroundColor: colors.warning + "15",
+    borderWidth: 1,
+    borderColor: colors.warning + "40",
+    borderRadius: radius.md,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  reviewButtonText: {
+    color: colors.textPrimary,
+    fontSize: fonts.caption,
+    fontWeight: "600",
   },
 });

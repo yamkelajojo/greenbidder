@@ -19,6 +19,7 @@ import { validate, createListingSchema } from "../../validators/schemas";
 import { supabase } from "../../config/supabase";
 import { colors, spacing, fonts, radius } from "../../config/theme";
 import { analyseAndSave } from "../../services/aiService";
+import PriceGuidance from "../../components/shared/PriceGuidance";
 
 /**
  * Create Listing screen — farmer creates a new produce listing.
@@ -315,6 +316,18 @@ export default function CreateListingScreen({ navigation }) {
             <Text style={styles.fieldError}>{errors.title}</Text>
           ) : null}
         </View>
+
+        {/* Price Intelligence — appears when category is selected */}
+        {categoryId ? (
+          <PriceGuidance
+            categoryId={categoryId}
+            categoryName={
+              categories.find((c) => c.id === categoryId)?.name || ""
+            }
+            currentPrice={parseFloat(price) || null}
+            unit={unit}
+          />
+        ) : null}
 
         {/* Description */}
         <View style={styles.field}>

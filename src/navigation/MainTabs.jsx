@@ -18,11 +18,13 @@ import EditListingScreen from "../screens/farmer/EditListingScreen";
 import MarketPricesScreen from "../screens/shared/MarketPricesScreen";
 import ProfileScreen from "../screens/shared/ProfileScreen";
 import SavedListingsScreen from "../screens/buyer/SavedListingsScreen";
+import SearchScreen from "../screens/buyer/SearchScreen";
 
 const Tab = createBottomTabNavigator();
 const FeedStack = createNativeStackNavigator();
 const ListingsStack = createNativeStackNavigator();
-
+const SavedStack = createNativeStackNavigator();
+9;
 /**
  * Buyer flow: Feed → Listing Detail
  * Tapping a listing card in the feed navigates to its full detail view.
@@ -31,6 +33,7 @@ function FeedStackScreen() {
   return (
     <FeedStack.Navigator screenOptions={{ headerShown: false }}>
       <FeedStack.Screen name="FeedHome" component={BuyerFeedScreen} />
+      <FeedStack.Screen name="Search" component={SearchScreen} />
       <FeedStack.Screen name="ListingDetail" component={ListingDetailScreen} />
     </FeedStack.Navigator>
   );
@@ -57,6 +60,15 @@ function ListingsStackScreen() {
       />
       <ListingsStack.Screen name="EditListing" component={EditListingScreen} />
     </ListingsStack.Navigator>
+  );
+}
+
+function SavedStackScreen() {
+  return (
+    <SavedStack.Navigator screenOptions={{ headerShown: false }}>
+      <SavedStack.Screen name="SavedHome" component={SavedListingsScreen} />
+      <SavedStack.Screen name="ListingDetail" component={ListingDetailScreen} />
+    </SavedStack.Navigator>
   );
 }
 
@@ -113,7 +125,7 @@ export default function MainTabs() {
       {!isFarmer ? (
         <Tab.Screen
           name="Saved"
-          component={SavedListingsScreen}
+          component={SavedStackScreen}
           options={{
             tabBarLabel: "Saved",
             tabBarIcon: ({ color, size }) => (

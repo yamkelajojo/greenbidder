@@ -27,26 +27,11 @@ import { colors, spacing, fonts, radius } from "../../config/theme";
 /**
  * Buyer Feed — the heart of GreenBidder's buyer experience.
  *
- * This screen answers: "What should I buy today?"
- *
- * Layout when no filter is active:
- *   ┌─────────────────────────────┐
- *   │  Fresh Produce              │
- *   │  Direct from local farmers  │
- *   ├─────────────────────────────┤
- *   │  [All] [Tomatoes] [Onions]  │  ← category filters (tracked)
- *   ├─────────────────────────────┤
- *   │  ✨ Picked for You          │  ← horizontal recommendation row
- *   │  [card] [card] [card] →     │     (personalised or popular)
- *   ├─────────────────────────────┤
- *   │  Latest Listings            │  ← chronological feed
- *   │  ┌───────────────────────┐  │
- *   │  │  Full listing card    │  │
- *   │  └───────────────────────┘  │
- *   └─────────────────────────────┘
- *
- * Layout when a category filter is active:
- *   Recommendations hidden, only filtered results shown.
+ * Layout:
+ *   Header with title + search icon
+ *   Category filter chips
+ *   Recommendations row (Picked for You / Popular Now)
+ *   Latest listings feed
  *
  * Criterion 8 — CRUD Read, end-to-end
  * Criterion 3 — Parallel queries, joins, no N+1
@@ -54,14 +39,12 @@ import { colors, spacing, fonts, radius } from "../../config/theme";
 export default function BuyerFeedScreen({ navigation }) {
   const { profileId, isBuyer } = useAuth();
 
-  // Data
   const [listings, setListings] = useState([]);
   const [categories, setCategories] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
   const [profileSummary, setProfileSummary] = useState(null);
   const [isPersonalised, setIsPersonalised] = useState(false);
 
-  // UI
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -72,10 +55,6 @@ export default function BuyerFeedScreen({ navigation }) {
     }, [profileId]),
   );
 
-  /**
-   * Loads everything in parallel — categories, recommendations, and listings.
-   * Parallel fetch keeps the feed feeling instant.
-   */
   const loadAll = async () => {
     setIsLoading(true);
 
@@ -92,11 +71,9 @@ export default function BuyerFeedScreen({ navigation }) {
     ]);
 
     if (catResult.data) setCategories(catResult.data);
-
     setRecommendations(recResult.recommendations || []);
     setIsPersonalised(recResult.isPersonalised || false);
     setProfileSummary(recResult.profileSummary || null);
-
     if (listResult.data) setListings(listResult.data);
 
     setIsLoading(false);
@@ -111,21 +88,14 @@ export default function BuyerFeedScreen({ navigation }) {
     setIsLoading(false);
   };
 
-  /**
-   * Handles category filter tap — loads filtered results AND
-   * tracks the interaction for the recommendation engine.
-   */
   const handleCategoryPress = (catId) => {
     const newCategory = selectedCategory === catId ? null : catId;
     setSelectedCategory(newCategory);
 
     if (newCategory) {
-      // Track this filter tap — it's an explicit interest signal
       if (isBuyer && profileId) {
         const cat = categories.find((c) => c.id === newCategory);
-        if (cat) {
-          trackCategoryFilter(profileId, newCategory, cat.name, 0);
-        }
+        if (cat) trackCategoryFilter(profileId, newCategory, cat.name, 0);
       }
       loadFilteredListings(newCategory);
     } else {
@@ -143,7 +113,26 @@ export default function BuyerFeedScreen({ navigation }) {
     setIsRefreshing(false);
   };
 
-  // ── Recommendation Card (horizontal scroll) ──────────────────
+  // ── Header with search icon ──
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <View style={styles.headerRow}>
+        <View style={styles.headerTitles}>
+          <Text style={styles.title}>Fresh Produce</Text>
+          <Text style={styles.subtitle}>Direct from local farmers</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.searchButton}
+          onPress={() => navigation.navigate("Search")}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.searchButtonIcon}>🔍</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // ── Recommendation Card ──
   const renderRecommendationCard = (item) => {
     const primaryImage = item.listing_images?.find((img) => img.is_primary);
     const imageUrl =
@@ -168,7 +157,6 @@ export default function BuyerFeedScreen({ navigation }) {
           </View>
         )}
 
-        {/* AI score badge */}
         {aiScore ? (
           <View style={styles.recAiBadge}>
             <Text style={styles.recAiBadgeText}>{aiScore}</Text>
@@ -193,13 +181,11 @@ export default function BuyerFeedScreen({ navigation }) {
     );
   };
 
-  // ── Recommendation Section ───────────────────────────────────
   const renderRecommendationSection = () => {
     if (selectedCategory || recommendations.length === 0) return null;
 
     return (
       <View style={styles.recSection}>
-        {/* Section header */}
         <View style={styles.recHeader}>
           <View>
             <Text style={styles.recSectionTitle}>
@@ -223,7 +209,6 @@ export default function BuyerFeedScreen({ navigation }) {
           </View>
         </View>
 
-        {/* Horizontal scrollable recommendation cards */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -235,7 +220,6 @@ export default function BuyerFeedScreen({ navigation }) {
     );
   };
 
-  // ── Full Listing Card (vertical feed) ────────────────────────
   const renderListing = ({ item }) => {
     const primaryImage = item.listing_images?.find((img) => img.is_primary);
     const imageUrl =
@@ -298,12 +282,9 @@ export default function BuyerFeedScreen({ navigation }) {
     );
   };
 
-  // ── Feed Header (recommendations + section title) ────────────
   const renderFeedHeader = () => (
     <View>
       {renderRecommendationSection()}
-
-      {/* "Latest" section divider */}
       <View style={styles.sectionDivider}>
         <Text style={styles.sectionLabel}>
           {selectedCategory
@@ -318,7 +299,6 @@ export default function BuyerFeedScreen({ navigation }) {
     </View>
   );
 
-  // ── Empty State ──────────────────────────────────────────────
   const renderEmpty = () => (
     <View style={styles.empty}>
       <Text style={styles.emptyIcon}>🔍</Text>
@@ -331,14 +311,10 @@ export default function BuyerFeedScreen({ navigation }) {
     </View>
   );
 
-  // ── Loading ──────────────────────────────────────────────────
   if (isLoading && listings.length === 0) {
     return (
       <SafeAreaView style={styles.safe}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Fresh Produce</Text>
-          <Text style={styles.subtitle}>Direct from local farmers</Text>
-        </View>
+        {renderHeader()}
         <View style={styles.loader}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
@@ -348,10 +324,7 @@ export default function BuyerFeedScreen({ navigation }) {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Fresh Produce</Text>
-        <Text style={styles.subtitle}>Direct from local farmers</Text>
-      </View>
+      {renderHeader()}
 
       {/* Category filter chips */}
       <FlatList
@@ -386,7 +359,6 @@ export default function BuyerFeedScreen({ navigation }) {
         )}
       />
 
-      {/* Main feed — recommendations header + listing cards */}
       <FlatList
         data={listings}
         renderItem={renderListing}
@@ -406,27 +378,38 @@ export default function BuyerFeedScreen({ navigation }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  STYLES
-// ═══════════════════════════════════════════════════════════════
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.backgroundSecondary },
 
-  // Header
   header: {
     padding: spacing.lg,
     paddingBottom: spacing.sm,
     backgroundColor: colors.background,
   },
+  headerRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  headerTitles: { flex: 1 },
   title: { fontSize: fonts.h1, fontWeight: "700", color: colors.textPrimary },
   subtitle: {
     fontSize: fonts.caption,
     color: colors.textSecondary,
     marginTop: 2,
   },
+  searchButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.backgroundSecondary,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  searchButtonIcon: { fontSize: 18 },
 
-  // Category chips
   categoryList: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
@@ -450,13 +433,9 @@ const styles = StyleSheet.create({
   categoryChipText: { fontSize: fonts.caption, color: colors.textSecondary },
   categoryChipTextSelected: { color: colors.primaryDark, fontWeight: "600" },
 
-  // Loader
   loader: { flex: 1, justifyContent: "center", alignItems: "center" },
 
-  // ── Recommendation Section ──
-  recSection: {
-    marginBottom: spacing.md,
-  },
+  recSection: { marginBottom: spacing.md },
   recHeader: {
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
@@ -475,8 +454,6 @@ const styles = StyleSheet.create({
     paddingLeft: spacing.md,
     paddingRight: spacing.sm,
   },
-
-  // ── Recommendation Card ──
   recCard: {
     width: 160,
     backgroundColor: colors.background,
@@ -485,17 +462,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.borderLight,
     overflow: "hidden",
-    // Subtle shadow for depth
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.06,
     shadowRadius: 4,
     elevation: 2,
   },
-  recImage: {
-    width: 160,
-    height: 100,
-  },
+  recImage: { width: 160, height: 100 },
   recImagePlaceholder: {
     width: 160,
     height: 100,
@@ -515,14 +488,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  recAiBadgeText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-  recContent: {
-    padding: spacing.sm,
-  },
+  recAiBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+  recContent: { padding: spacing.sm },
   recCategory: {
     fontSize: 10,
     color: colors.textTertiary,
@@ -541,13 +508,8 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginTop: 4,
   },
-  recFarm: {
-    fontSize: 10,
-    color: colors.textTertiary,
-    marginTop: 2,
-  },
+  recFarm: { fontSize: 10, color: colors.textTertiary, marginTop: 2 },
 
-  // ── Section Divider ──
   sectionDivider: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -560,12 +522,8 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.textPrimary,
   },
-  sectionCount: {
-    fontSize: fonts.small,
-    color: colors.textTertiary,
-  },
+  sectionCount: { fontSize: fonts.small, color: colors.textTertiary },
 
-  // ── Main Feed Card ──
   list: { padding: spacing.md, paddingTop: 0 },
   card: {
     backgroundColor: colors.background,
@@ -593,11 +551,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: radius.sm,
   },
-  aiBadgeText: {
-    color: "#fff",
-    fontSize: fonts.small,
-    fontWeight: "700",
-  },
+  aiBadgeText: { color: "#fff", fontSize: fonts.small, fontWeight: "700" },
   cardContent: { padding: spacing.md },
   cardTopRow: {
     flexDirection: "row",
@@ -633,25 +587,15 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.primary,
   },
-  cardQuantity: {
-    fontSize: fonts.caption,
-    color: colors.textSecondary,
-  },
+  cardQuantity: { fontSize: fonts.caption, color: colors.textSecondary },
   cardBottomRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
-  farmName: {
-    fontSize: fonts.caption,
-    color: colors.textSecondary,
-  },
-  timeText: {
-    fontSize: fonts.small,
-    color: colors.textTertiary,
-  },
+  farmName: { fontSize: fonts.caption, color: colors.textSecondary },
+  timeText: { fontSize: fonts.small, color: colors.textTertiary },
 
-  // Empty state
   empty: {
     alignItems: "center",
     paddingTop: spacing.xxl,

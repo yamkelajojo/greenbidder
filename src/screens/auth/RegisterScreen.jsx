@@ -3,13 +3,13 @@ import {
   View,
   Text,
   TextInput,
-  TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
 } from "react-native";
+import Animated from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { registerUser } from "../../services/authService";
 import {
@@ -19,9 +19,28 @@ import {
 import { validate, registerSchema } from "../../validators/schemas";
 import { colors, spacing, fonts, radius } from "../../config/theme";
 import { supabase } from "../../config/supabase";
+import TactilePressable from "../../components/shared/TactilePressable";
+import FadeSlideIn from "../../components/shared/FadeSlideIn";
+import AnimatedLogo from "../../components/shared/AnimatedLogo";
+import {
+  AnimatedErrorText,
+  AnimatedErrorBanner,
+  useErrorShake,
+} from "../../components/shared/AnimatedError";
+import { haptic } from "../../utils/haptics";
 
 /**
  * Register screen — name, email, password, role selection.
+ *
+ * Stage 1a polish:
+ *   • AnimatedLogo at top (subtle mode once user arrives from Login)
+ *   • Staggered FadeSlideIn across sections
+ *   • Role cards: TactilePressable; selection haptic fires on change only
+ *   • Each input has its own shake style — only failing fields shake
+ *   • AnimatedErrorText slides in below failed fields
+ *   • AnimatedErrorBanner springs down on API error
+ *   • Commit haptic on submit
+ *
  * After signup, creates the role-specific profile (farmer or buyer).
  * Criterion 8 — full auth flow with error handling.
  */
@@ -29,16 +48,32 @@ export default function RegisterScreen({ navigation }) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState(null); // "buyer" or "farmer"
+  const [role, setRole] = useState(null);
   const [errors, setErrors] = useState({});
   const [apiError, setApiError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // One shake style per input — targeted shakes, not a blanket one
+  const [nameShakeStyle, shakeName] = useErrorShake();
+  const [emailShakeStyle, shakeEmail] = useErrorShake();
+  const [passwordShakeStyle, shakePassword] = useErrorShake();
+  const [roleShakeStyle, shakeRole] = useErrorShake();
+
+  /**
+   * Role selection handler — fires a selection haptic ONLY when the
+   * role actually changes. Repeated taps on the already-selected role
+   * stay silent.
+   */
+  const handleRoleSelect = (newRole) => {
+    if (role === newRole) return;
+    setRole(newRole);
+    haptic.selection();
+  };
 
   const handleRegister = async () => {
     setErrors({});
     setApiError("");
 
-    // Criterion 4 — validate all input before sending
     const result = validate(registerSchema, {
       fullName,
       email,
@@ -47,12 +82,17 @@ export default function RegisterScreen({ navigation }) {
     });
     if (!result.success) {
       setErrors(result.errors);
+      // Shake whichever fields failed
+      if (result.errors.fullName) shakeName();
+      if (result.errors.email) shakeEmail();
+      if (result.errors.password) shakePassword();
+      if (result.errors.role) shakeRole();
       return;
     }
 
     setIsLoading(true);
     try {
-      // Step 1: Create auth user (trigger auto-creates users table row)
+      // Step 1: Create auth user (trigger auto-creates users row)
       const { data, error } = await registerUser({
         email,
         password,
@@ -71,18 +111,15 @@ export default function RegisterScreen({ navigation }) {
         return;
       }
 
-      // Step 2: Create role-specific profile
-      // The auth trigger creates the users row — we need to get that user's id
+      // Step 2: Wait briefly for trigger to create users row, then fetch it
       const userId = data?.user?.id;
       if (!userId) {
         setApiError("Account created but profile setup failed. Please log in.");
         return;
       }
 
-      // Small delay to let the auth trigger create the users row
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
-      // Fetch our app user id (not auth id) from the users table
       let userData = null;
       let retries = 3;
       while (retries > 0 && !userData) {
@@ -115,7 +152,7 @@ export default function RegisterScreen({ navigation }) {
         });
       }
 
-      // Auth state change is handled by useAuth — it will redirect automatically
+      // useAuth listener handles redirect
     } catch (err) {
       setApiError("Network error. Check your connection and try again.");
     } finally {
@@ -133,136 +170,147 @@ export default function RegisterScreen({ navigation }) {
           contentContainerStyle={styles.scroll}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Logo — subtle mode since it already played on Login */}
           <View style={styles.header}>
-            <Text style={styles.logo}>GreenBidder</Text>
-            <Text style={styles.subtitle}>Join the marketplace</Text>
+            <AnimatedLogo text="GreenBidder" style={styles.logo} />
+            <FadeSlideIn delay={120} distance={6}>
+              <Text style={styles.subtitle}>Join the marketplace</Text>
+            </FadeSlideIn>
           </View>
 
           <View style={styles.form}>
-            <Text style={styles.title}>Create Account</Text>
+            <FadeSlideIn delay={200}>
+              <Text style={styles.title}>Create Account</Text>
+            </FadeSlideIn>
 
-            {apiError ? (
-              <View style={styles.errorBanner}>
-                <Text style={styles.errorBannerText}>{apiError}</Text>
-              </View>
-            ) : null}
+            <AnimatedErrorBanner message={apiError} />
 
-            {/* Role selection — Criterion 1: reusable pattern via props */}
-            <Text style={styles.label}>I am a...</Text>
-            <View style={styles.roleRow}>
-              <TouchableOpacity
-                style={[
-                  styles.roleButton,
-                  role === "buyer" && styles.roleSelected,
-                ]}
-                onPress={() => setRole("buyer")}
-                activeOpacity={0.8}
+            {/* Role selection */}
+            <FadeSlideIn delay={260}>
+              <Animated.View style={roleShakeStyle}>
+                <Text style={styles.label}>I am a...</Text>
+                <View style={styles.roleRow}>
+                  <TactilePressable
+                    style={[
+                      styles.roleButton,
+                      role === "buyer" && styles.roleSelected,
+                    ]}
+                    onPress={() => handleRoleSelect("buyer")}
+                  >
+                    <Text style={styles.roleEmoji}>🛒</Text>
+                    <Text
+                      style={[
+                        styles.roleText,
+                        role === "buyer" && styles.roleTextSelected,
+                      ]}
+                    >
+                      Buyer
+                    </Text>
+                    <Text style={styles.roleDesc}>Browse and buy produce</Text>
+                  </TactilePressable>
+
+                  <TactilePressable
+                    style={[
+                      styles.roleButton,
+                      role === "farmer" && styles.roleSelected,
+                    ]}
+                    onPress={() => handleRoleSelect("farmer")}
+                  >
+                    <Text style={styles.roleEmoji}>🌱</Text>
+                    <Text
+                      style={[
+                        styles.roleText,
+                        role === "farmer" && styles.roleTextSelected,
+                      ]}
+                    >
+                      Farmer
+                    </Text>
+                    <Text style={styles.roleDesc}>List and sell produce</Text>
+                  </TactilePressable>
+                </View>
+                <AnimatedErrorText error={errors.role} />
+              </Animated.View>
+            </FadeSlideIn>
+
+            {/* Full Name */}
+            <FadeSlideIn delay={340}>
+              <Animated.View style={[styles.field, nameShakeStyle]}>
+                <Text style={styles.label}>Full Name</Text>
+                <TextInput
+                  style={[styles.input, errors.fullName && styles.inputError]}
+                  value={fullName}
+                  onChangeText={setFullName}
+                  placeholder="Your full name"
+                  placeholderTextColor={colors.textTertiary}
+                  autoComplete="name"
+                />
+                <AnimatedErrorText error={errors.fullName} />
+              </Animated.View>
+            </FadeSlideIn>
+
+            {/* Email */}
+            <FadeSlideIn delay={400}>
+              <Animated.View style={[styles.field, emailShakeStyle]}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  style={[styles.input, errors.email && styles.inputError]}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="you@example.com"
+                  placeholderTextColor={colors.textTertiary}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoComplete="email"
+                />
+                <AnimatedErrorText error={errors.email} />
+              </Animated.View>
+            </FadeSlideIn>
+
+            {/* Password */}
+            <FadeSlideIn delay={460}>
+              <Animated.View style={[styles.field, passwordShakeStyle]}>
+                <Text style={styles.label}>Password</Text>
+                <TextInput
+                  style={[styles.input, errors.password && styles.inputError]}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder="Min 8 characters, 1 uppercase, 1 number"
+                  placeholderTextColor={colors.textTertiary}
+                  secureTextEntry
+                />
+                <AnimatedErrorText error={errors.password} />
+              </Animated.View>
+            </FadeSlideIn>
+
+            {/* Submit */}
+            <FadeSlideIn delay={540}>
+              <TactilePressable
+                style={[styles.button, isLoading && styles.buttonDisabled]}
+                onPress={handleRegister}
+                disabled={isLoading}
+                haptic="commit"
               >
-                <Text style={styles.roleEmoji}>🛒</Text>
-                <Text
-                  style={[
-                    styles.roleText,
-                    role === "buyer" && styles.roleTextSelected,
-                  ]}
-                >
-                  Buyer
-                </Text>
-                <Text style={styles.roleDesc}>Browse and buy produce</Text>
-              </TouchableOpacity>
+                {isLoading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.buttonText}>Create Account</Text>
+                )}
+              </TactilePressable>
+            </FadeSlideIn>
 
-              <TouchableOpacity
-                style={[
-                  styles.roleButton,
-                  role === "farmer" && styles.roleSelected,
-                ]}
-                onPress={() => setRole("farmer")}
-                activeOpacity={0.8}
+            {/* Log in link */}
+            <FadeSlideIn delay={620}>
+              <TactilePressable
+                style={styles.linkButton}
+                variant="compact"
+                onPress={() => navigation.navigate("Login")}
               >
-                <Text style={styles.roleEmoji}>🌱</Text>
-                <Text
-                  style={[
-                    styles.roleText,
-                    role === "farmer" && styles.roleTextSelected,
-                  ]}
-                >
-                  Farmer
+                <Text style={styles.linkText}>
+                  Already have an account?{" "}
+                  <Text style={styles.linkBold}>Log in</Text>
                 </Text>
-                <Text style={styles.roleDesc}>List and sell produce</Text>
-              </TouchableOpacity>
-            </View>
-            {errors.role ? (
-              <Text style={styles.fieldError}>{errors.role}</Text>
-            ) : null}
-
-            <View style={styles.field}>
-              <Text style={styles.label}>Full Name</Text>
-              <TextInput
-                style={[styles.input, errors.fullName && styles.inputError]}
-                value={fullName}
-                onChangeText={setFullName}
-                placeholder="Your full name"
-                placeholderTextColor={colors.textTertiary}
-                autoComplete="name"
-              />
-              {errors.fullName ? (
-                <Text style={styles.fieldError}>{errors.fullName}</Text>
-              ) : null}
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.label}>Email</Text>
-              <TextInput
-                style={[styles.input, errors.email && styles.inputError]}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="you@example.com"
-                placeholderTextColor={colors.textTertiary}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoComplete="email"
-              />
-              {errors.email ? (
-                <Text style={styles.fieldError}>{errors.email}</Text>
-              ) : null}
-            </View>
-
-            <View style={styles.field}>
-              <Text style={styles.label}>Password</Text>
-              <TextInput
-                style={[styles.input, errors.password && styles.inputError]}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Min 8 characters, 1 uppercase, 1 number"
-                placeholderTextColor={colors.textTertiary}
-                secureTextEntry
-              />
-              {errors.password ? (
-                <Text style={styles.fieldError}>{errors.password}</Text>
-              ) : null}
-            </View>
-
-            <TouchableOpacity
-              style={[styles.button, isLoading && styles.buttonDisabled]}
-              onPress={handleRegister}
-              disabled={isLoading}
-              activeOpacity={0.8}
-            >
-              {isLoading ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <Text style={styles.buttonText}>Create Account</Text>
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.linkButton}
-              onPress={() => navigation.navigate("Login")}
-            >
-              <Text style={styles.linkText}>
-                Already have an account?{" "}
-                <Text style={styles.linkBold}>Log in</Text>
-              </Text>
-            </TouchableOpacity>
+              </TactilePressable>
+            </FadeSlideIn>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -275,7 +323,12 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: { flexGrow: 1, padding: spacing.lg, paddingTop: spacing.xl },
   header: { alignItems: "center", marginBottom: spacing.lg },
-  logo: { fontSize: 32, fontWeight: "700", color: colors.primary },
+  logo: {
+    fontSize: 36,
+    fontWeight: "800",
+    color: colors.primary,
+    letterSpacing: 0,
+  },
   subtitle: {
     fontSize: fonts.caption,
     color: colors.textSecondary,
@@ -288,19 +341,10 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     marginBottom: spacing.lg,
   },
-  errorBanner: {
-    backgroundColor: "#FEF2F2",
-    borderWidth: 1,
-    borderColor: colors.danger,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-  },
-  errorBannerText: { color: colors.danger, fontSize: fonts.caption },
   roleRow: {
     flexDirection: "row",
     gap: spacing.md,
-    marginBottom: spacing.md,
+    marginBottom: spacing.sm,
     marginTop: spacing.sm,
   },
   roleButton: {
@@ -310,6 +354,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     padding: spacing.md,
     alignItems: "center",
+    backgroundColor: colors.background,
   },
   roleSelected: {
     borderColor: colors.primary,
@@ -346,11 +391,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   inputError: { borderColor: colors.danger },
-  fieldError: {
-    color: colors.danger,
-    fontSize: fonts.small,
-    marginTop: spacing.xs,
-  },
   button: {
     height: 48,
     backgroundColor: colors.primary,
@@ -364,6 +404,7 @@ const styles = StyleSheet.create({
   linkButton: {
     alignItems: "center",
     marginTop: spacing.lg,
+    paddingVertical: spacing.sm,
     paddingBottom: spacing.xl,
   },
   linkText: { fontSize: fonts.caption, color: colors.textSecondary },

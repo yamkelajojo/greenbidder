@@ -16,10 +16,73 @@ import AIBadge from "../../components/ai/AIBadge";
 /**
  * Profile screen — shows user info and logout.
  *
- * TEMPORARY: includes an "AI Badge Lab" section at the bottom for
- * testing the new AIBadge component while the modal system is being
- * built. Remove once Stage 4 integration is complete.
+ * TEMPORARY: "AI Badge Lab" section at the bottom tests the AIBadge
+ * component. The first three badges in the top row have mock aiData
+ * attached — tapping them opens the cinematic morph modal. The rest
+ * only capture tap coordinates into the "Last tap" readout. This lets
+ * us verify both modal mode and callback-fallback mode.
+ *
+ * Will be removed once the badge is integrated into real screens.
  */
+
+// Mock AI data for the lab — this mimics the shape of an ai_analyses row.
+const MOCK_AI_DATA_BY_SCORE = {
+  7.2: {
+    condition_score: 7.2,
+    ripeness_estimate: "Approaching peak",
+    growth_insight:
+      "Good colour development, minor cosmetic blemishes visible. Flavour will be strong in 2-3 days.",
+    price_suggestion_min: 18,
+    price_suggestion_max: 24,
+    raw_feedback: {
+      variety_identified: "Pink Lady apples",
+      harvest_readiness: "soon",
+      shelf_life_days: 8,
+      storage_advice:
+        "Keep refrigerated at 2-4°C, away from ethylene producers like bananas.",
+      seasonal_note:
+        "End of season — expect quality decline in the coming weeks.",
+      market_insight: "High demand in premium grocery segment.",
+      confidence_level: "high",
+    },
+  },
+  8.5: {
+    condition_score: 8.5,
+    ripeness_estimate: "Peak",
+    growth_insight:
+      "Vibrant colour, firm skin, no visible defects. Good size uniformity.",
+    price_suggestion_min: 22,
+    price_suggestion_max: 28,
+    raw_feedback: {
+      variety_identified: "Gala apples",
+      harvest_readiness: "ready",
+      shelf_life_days: 6,
+      storage_advice: "Store at 2-4°C to extend shelf life by up to 3 days.",
+      seasonal_note: "Mid-season harvest — excellent flavour profile.",
+      market_insight: "Strong retail demand this week.",
+      confidence_level: "high",
+    },
+  },
+  9.8: {
+    condition_score: 9.8,
+    ripeness_estimate: "Peak",
+    growth_insight:
+      "Exceptional specimen — excellent colour, perfect size, zero defects.",
+    price_suggestion_min: 28,
+    price_suggestion_max: 36,
+    raw_feedback: {
+      variety_identified: "Honeycrisp apples",
+      harvest_readiness: "ready",
+      shelf_life_days: 10,
+      storage_advice:
+        "Store cool and dry. Premium produce — rotate frequently for display.",
+      seasonal_note: "Prime harvest window.",
+      market_insight: "Premium price point justified by quality.",
+      confidence_level: "high",
+    },
+  },
+};
+
 export default function ProfileScreen() {
   const { user, userRole } = useAuth();
   const [lastTap, setLastTap] = useState(null);
@@ -51,7 +114,6 @@ export default function ProfileScreen() {
     });
   };
 
-  // Sample scores across the full gradient so we can see the color math
   const sampleScores = [3.2, 5.4, 6.5, 7.2, 7.8, 8.1, 8.5, 8.9, 9.4, 9.8];
 
   return (
@@ -81,24 +143,28 @@ export default function ProfileScreen() {
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
 
-        {/* ─── TEMPORARY: AI BADGE LAB ─────────────────────── */}
+        {/* ─── AI BADGE LAB (temp) ────────────────────── */}
         <View style={styles.lab}>
           <Text style={styles.labTitle}>AI Badge Lab</Text>
           <Text style={styles.labSubtitle}>
-            Testing the new AI condition badge. Each score gets its own color.
-            Tap any badge to verify the measure-in-window capture.
+            Badges with AI data (7.2, 8.5, 9.8) open the morph modal on tap.
+            Others just capture tap coordinates below.
           </Text>
 
           <Text style={styles.labSection}>Full gradient range</Text>
           <View key={`row-${remountKey}`} style={styles.badgeRow}>
-            {sampleScores.map((s) => (
-              <AIBadge
-                key={`${s}-${remountKey}`}
-                score={s}
-                onPress={handleBadgePress}
-                style={styles.badgeSpacing}
-              />
-            ))}
+            {sampleScores.map((s) => {
+              const mockData = MOCK_AI_DATA_BY_SCORE[s] || null;
+              return (
+                <AIBadge
+                  key={`${s}-${remountKey}`}
+                  score={s}
+                  aiData={mockData}
+                  onPress={handleBadgePress}
+                  style={styles.badgeSpacing}
+                />
+              );
+            })}
           </View>
 
           <Text style={styles.labSection}>Compact variant</Text>
@@ -131,7 +197,9 @@ export default function ProfileScreen() {
               </Text>
             </View>
           ) : (
-            <Text style={styles.tapHint}>Tap a badge above to test →</Text>
+            <Text style={styles.tapHint}>
+              Tap 7.2, 8.5, or 9.8 for modal — others record coords →
+            </Text>
           )}
         </View>
       </ScrollView>
@@ -170,11 +238,7 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: colors.primaryDark,
   },
-  email: {
-    fontSize: fonts.body,
-    color: colors.textPrimary,
-    fontWeight: "500",
-  },
+  email: { fontSize: fonts.body, color: colors.textPrimary, fontWeight: "500" },
   roleBadge: {
     marginTop: spacing.sm,
     paddingHorizontal: spacing.md,
@@ -196,13 +260,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  logoutText: {
-    color: colors.danger,
-    fontSize: fonts.body,
-    fontWeight: "600",
-  },
+  logoutText: { color: colors.danger, fontSize: fonts.body, fontWeight: "600" },
 
-  // AI Badge Lab (temp)
   lab: {
     marginTop: spacing.xl,
     padding: spacing.lg,
@@ -231,14 +290,8 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.sm,
   },
-  badgeRow: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.sm,
-  },
-  badgeSpacing: {
-    marginRight: 0,
-  },
+  badgeRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  badgeSpacing: { marginRight: 0 },
   replayButton: {
     marginTop: spacing.md,
     paddingVertical: spacing.sm,

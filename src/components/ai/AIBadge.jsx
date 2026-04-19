@@ -4,39 +4,46 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   useFrameCallback,
+  useAnimatedReaction,
   withSequence,
   withTiming,
   withDelay,
   Easing,
   interpolate,
+  Extrapolation,
 } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
 import { scoreToHex, scoreToColor } from "../../utils/scoreColor";
+import { useAIModal } from "./AIModalContext";
 
 /**
  * ═══════════════════════════════════════════════════════════════════════
- *   AIBadge v11 — Final Calm Pass
+ *   AIBadge v16 — Post-Close Pulse
  *
- *   Changes from v10:
- *     • Score text: #4a453c → #8a857c (warm light gray, much softer)
- *     • Ribbon palette alphas × 0.75 (additional 25% reduction)
- *     • Pill alpha 0.77 → 0.74 (3% more glass)
- *     • Star personality variance widened ×1.15 (15% more varied)
- *     • Sparkle glyph + dot both at 75% opacity (visible but not loud)
+ *   Changes from v15:
  *
- *   Everything else (motion, breath choreography, star-only personality,
- *   three ribbon layers, stacked glow shadows) unchanged from v10.
+ *   • POST-CLOSE PULSE: when this badge finishes absorbing the modal
+ *     back into itself (activeSource transitions from true → false),
+ *     it fires a quick subtle pulse — pillScale 1 → 1.08 → 1 over
+ *     360ms. Signals "landed." Reads as the badge reacting to the
+ *     modal arriving back into it.
+ *
+ *   Everything else (solid-base handoff, dot/sparkle scale fixes,
+ *   return scale animation) unchanged from v15.
  * ═══════════════════════════════════════════════════════════════════════
  */
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// ─── Ribbon palette — additional × 0.75 reduction ────────────────
+function makeBadgeId() {
+  return Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+}
+
 function buildGradientColors(score) {
   let primaryTransparent, secondaryPeak;
   if (score >= 7.5) {
     primaryTransparent = "rgba(99, 153, 34, 0.0)";
-    secondaryPeak = "rgba(99, 153, 34, 0.165)"; // was 0.22
+    secondaryPeak = "rgba(99, 153, 34, 0.165)";
   } else if (score >= 6) {
     primaryTransparent = "rgba(239, 159, 39, 0.0)";
     secondaryPeak = "rgba(239, 159, 39, 0.165)";
@@ -46,12 +53,12 @@ function buildGradientColors(score) {
   }
   return [
     primaryTransparent,
-    "rgba(239, 159, 39, 0.09)", // was 0.12
-    "rgba(255, 220, 170, 0.11)", // was 0.15
+    "rgba(239, 159, 39, 0.09)",
+    "rgba(255, 220, 170, 0.11)",
     secondaryPeak,
-    "rgba(255, 200, 160, 0.105)", // was 0.14
-    "rgba(168, 195, 170, 0.075)", // was 0.10
-    "rgba(205, 195, 215, 0.06)", // was 0.08
+    "rgba(255, 200, 160, 0.105)",
+    "rgba(168, 195, 170, 0.075)",
+    "rgba(205, 195, 215, 0.06)",
     primaryTransparent,
   ];
 }
@@ -63,7 +70,6 @@ function pillBackgroundForScore(score) {
   const mixR = Math.round(r * 0.04 + 255 * 0.96);
   const mixG = Math.round(g * 0.04 + 255 * 0.96);
   const mixB = Math.round(b * 0.04 + 255 * 0.96);
-  // 3% more glass — 0.77 → 0.74
   return `rgba(${mixR}, ${mixG}, ${mixB}, 0.74)`;
 }
 
@@ -75,30 +81,19 @@ function pillShadowAlpha(score) {
   return `rgba(${dR}, ${dG}, ${dB}, 0.05)`;
 }
 
-/**
- * Sparkle glyph color — same score-driven hue, but now at 75% opacity
- * per the final dial-down. The textShadow glow layers underneath still
- * render at their own intensity, so the effect is a slightly translucent
- * glyph on top of its colored halos.
- */
 function sparkleGlyphMainColor(score) {
   const [r, g, b] = scoreToColor(score);
   const dR = Math.round(r * 0.8);
   const dG = Math.round(g * 0.8);
   const dB = Math.round(b * 0.8);
-  return `rgba(${dR}, ${dG}, ${dB}, 0.75)`; // was 0.95
+  return `rgba(${dR}, ${dG}, ${dB}, 0.75)`;
 }
 
-/**
- * Dot color — at 75% opacity (via rgba wrapper since scoreToHex returns
- * a solid hex string). We re-derive the RGB here and apply 0.75 alpha.
- */
 function dotBackgroundForScore(score) {
   const [r, g, b] = scoreToColor(score);
   return `rgba(${r}, ${g}, ${b}, 0.75)`;
 }
 
-// ─── Sizing ───────────────────────────────────────────
 const DEFAULT_SIZING = {
   paddingX: 11,
   paddingY: 5,
@@ -125,32 +120,25 @@ const SQRT3 = 1.732050807568;
 const SPEED_MULT = 1.15;
 const DIST_MULT = 1.15;
 
-/**
- * Per-badge star personality, variance widened by 15% over v10.
- * Every range's SPAN is multiplied by 1.15 (bounds pushed outward).
- * The base/center of each range stays the same; only the reach changes.
- */
 function makeSparklePersonality() {
-  // Helper: center + span random
   const jitter = (base, span) => base + (Math.random() - 0.5) * span * 1.15;
-
   return {
     breathRotDirection: Math.random() > 0.5 ? 1 : -1,
-    // base ranges widened ×1.15 from v10
-    breathRotMag: jitter(1.1, 0.8), // v10: 0.7-1.5, now ~0.64-1.56
+    breathRotMag: jitter(1.1, 0.8),
     tapRotDirection: Math.random() > 0.5 ? 1 : -1,
     tapRotMag: jitter(1.1, 0.8),
-    scaleMag: jitter(1.1, 0.5), // v10: 0.85-1.35, now ~0.81-1.39
-    glowBoostMag: jitter(1.0, 0.8), // v10: 0.6-1.4, now ~0.54-1.46
-    durationMult: jitter(1.0, 0.24), // v10: 0.88-1.12, now ~0.862-1.138
-    ambientRotSpeed: jitter(1.05, 0.5), // v10: 0.8-1.3
-    ambientRotAmount: jitter(1.05, 0.7), // v10: 0.7-1.4
-    ambientGlowSpeed: jitter(1.05, 0.4), // v10: 0.85-1.25
+    scaleMag: jitter(1.1, 0.5),
+    glowBoostMag: jitter(1.0, 0.8),
+    durationMult: jitter(1.0, 0.24),
+    ambientRotSpeed: jitter(1.05, 0.5),
+    ambientRotAmount: jitter(1.05, 0.7),
+    ambientGlowSpeed: jitter(1.05, 0.4),
   };
 }
 
 export default function AIBadge({
   score = 0,
+  aiData = null,
   onPress,
   style,
   disabled = false,
@@ -159,8 +147,24 @@ export default function AIBadge({
   const sizing = compact ? COMPACT_SIZING : DEFAULT_SIZING;
   const phase = useRef(Math.random() * Math.PI * 2).current;
   const personality = useRef(makeSparklePersonality()).current;
+  const sourceId = useRef(makeBadgeId()).current;
+
+  let showAIModal = null;
+  let activeSourceId = null;
+  let isModalOpen = false;
+  let closeProgressShared = null;
+  try {
+    const ctx = useAIModal();
+    showAIModal = ctx.showAIModal;
+    activeSourceId = ctx.activeSourceId;
+    isModalOpen = ctx.isOpen;
+    closeProgressShared = ctx.closeProgress;
+  } catch (e) {}
+
+  const isActiveSource = activeSourceId === sourceId;
 
   const pillScale = useSharedValue(1);
+  const returnScale = useSharedValue(1); // NEW — scales up 0.75→1.0 on return
   const dotScale = useSharedValue(1);
   const sparkleScale = useSharedValue(1);
   const sparkleRotate = useSharedValue(0);
@@ -169,6 +173,7 @@ export default function AIBadge({
   const motionTime = useSharedValue(0);
   const shineProgress = useSharedValue(0);
   const shineOpacity = useSharedValue(0);
+  const hideOpacity = useSharedValue(1);
 
   const viewRef = useRef(null);
   const dotBg = useMemo(() => dotBackgroundForScore(score), [score]);
@@ -176,6 +181,84 @@ export default function AIBadge({
   const gradientColors = useMemo(() => buildGradientColors(score), [score]);
   const pillBg = useMemo(() => pillBackgroundForScore(score), [score]);
   const pillShadowColor = useMemo(() => pillShadowAlpha(score), [score]);
+
+  // Track the previous active-source state so we can detect the transition
+  // (was-active → no-longer-active), which is exactly when the modal has
+  // finished closing. That's when we fire the "landed" pulse.
+  const wasActiveSource = useRef(false);
+
+  useEffect(() => {
+    if (isActiveSource && isModalOpen) {
+      // Opening — snap hide
+      hideOpacity.value = withTiming(0, { duration: 120 });
+      returnScale.value = 0.75;
+      wasActiveSource.current = true;
+    } else if (!isActiveSource) {
+      // Not the source right now. Two cases:
+      //   A) We were never active → normal resting state, ensure visible.
+      //   B) We WERE active and just became inactive → modal close finished.
+      //      Fire a subtle "landed" pulse — quick scale up and back. Signals
+      //      the badge just absorbed the modal back into itself.
+      hideOpacity.value = withTiming(1, { duration: 100 });
+      returnScale.value = withTiming(1, { duration: 100 });
+
+      if (wasActiveSource.current) {
+        // Case B — fire post-close pulse with tactile bezier ease
+        // cubic-bezier(0.34, 1.35, 0.64, 1) — strong decel + subtle overshoot,
+        // matching the modal's EASE_TACTILE. Subtle but alive.
+        pillScale.value = withSequence(
+          withTiming(1.08, {
+            duration: 160,
+            easing: Easing.bezier(0.34, 1.35, 0.64, 1),
+          }),
+          withTiming(1, {
+            duration: 240,
+            easing: Easing.bezier(0.22, 1, 0.36, 1),
+          }),
+        );
+        wasActiveSource.current = false;
+      }
+    }
+    // If isActiveSource && !isModalOpen → closing. Handled by useAnimatedReaction.
+  }, [isActiveSource, isModalOpen]);
+
+  // SOLID-BASE HANDOFF during close.
+  //
+  // Timing sequence:
+  //   closeProgress 0.0 → 0.70  Modal shrinking at full opacity. Badge invisible.
+  //   closeProgress 0.70 → 0.85  Badge fades 0→1 (FAST — 150ms). Modal still fully solid.
+  //   closeProgress 0.85 → 1.0  Badge is solid. Modal drops from 1→0 ON TOP of
+  //                              the solid badge. No alpha-bleed because the modal
+  //                              is fading over an opaque badge layer, not a pale bg.
+  //
+  // This timing deliberately puts the badge at full opacity BEFORE the modal's
+  // ghostOpacity (in AIModal.jsx) starts dropping. That's the "solid base" the
+  // modal fades out over.
+  useAnimatedReaction(
+    () => {
+      if (!closeProgressShared) return 0;
+      return closeProgressShared.value;
+    },
+    (current) => {
+      if (isActiveSource && !isModalOpen && current > 0) {
+        // Badge opacity reaches 1.0 at closeProgress 0.85 — EARLIER than v15
+        hideOpacity.value = interpolate(
+          current,
+          [0.7, 0.85],
+          [0, 1],
+          Extrapolation.CLAMP,
+        );
+        // Scale grows across the full window 0.7→1.0 for smooth materializing
+        returnScale.value = interpolate(
+          current,
+          [0.7, 1.0],
+          [0.75, 1.0],
+          Extrapolation.CLAMP,
+        );
+      }
+    },
+    [isActiveSource, isModalOpen],
+  );
 
   useFrameCallback((frameInfo) => {
     const dt = (frameInfo.timeSincePreviousFrame ?? 16) / 1000;
@@ -185,7 +268,6 @@ export default function AIBadge({
     }
   });
 
-  // ─── Mount breath — pill/dot/ribbon/shine fixed, star personality-driven
   useEffect(() => {
     pillScale.value = withSequence(
       withTiming(1.06, { duration: 360, easing: Easing.out(Easing.cubic) }),
@@ -211,41 +293,30 @@ export default function AIBadge({
       withTiming(1, { duration: 600, easing: Easing.inOut(Easing.quad) }),
     );
 
-    // Star only — personality
     const D = personality.durationMult;
     const breathScale = 1 + 0.35 * personality.scaleMag;
     const breathRot =
       12 * personality.breathRotMag * personality.breathRotDirection;
-
     sparkleScale.value = withSequence(
       withTiming(breathScale, {
         duration: 360 * D,
         easing: Easing.out(Easing.cubic),
       }),
-      withTiming(1, {
-        duration: 540 * D,
-        easing: Easing.inOut(Easing.quad),
-      }),
+      withTiming(1, { duration: 540 * D, easing: Easing.inOut(Easing.quad) }),
     );
     sparkleRotate.value = withSequence(
       withTiming(breathRot, {
         duration: 360 * D,
         easing: Easing.out(Easing.cubic),
       }),
-      withTiming(0, {
-        duration: 540 * D,
-        easing: Easing.inOut(Easing.quad),
-      }),
+      withTiming(0, { duration: 540 * D, easing: Easing.inOut(Easing.quad) }),
     );
     sparkleGlowBoost.value = withSequence(
       withTiming(personality.glowBoostMag, {
         duration: 360 * D,
         easing: Easing.out(Easing.cubic),
       }),
-      withTiming(0, {
-        duration: 540 * D,
-        easing: Easing.inOut(Easing.quad),
-      }),
+      withTiming(0, { duration: 540 * D, easing: Easing.inOut(Easing.quad) }),
     );
   }, []);
 
@@ -256,9 +327,10 @@ export default function AIBadge({
       withTiming(1.18, { duration: 90, easing: Easing.out(Easing.quad) }),
       withTiming(1.08, { duration: 160, easing: Easing.inOut(Easing.quad) }),
     );
+    // FIX: dot now returns to 1.0 not 1.2
     dotScale.value = withSequence(
       withTiming(1.6, { duration: 90, easing: Easing.out(Easing.quad) }),
-      withTiming(1.2, { duration: 160, easing: Easing.inOut(Easing.quad) }),
+      withTiming(1.0, { duration: 160, easing: Easing.inOut(Easing.quad) }),
     );
     boost.value = 1;
     shineProgress.value = 0;
@@ -274,16 +346,13 @@ export default function AIBadge({
     const D = personality.durationMult;
     const tapScale = 1 + 0.55 * personality.scaleMag;
     const tapRot = 15 * personality.tapRotMag * personality.tapRotDirection;
-
+    // FIX: sparkle now returns to 1.0 not 1.15
     sparkleScale.value = withSequence(
       withTiming(tapScale, {
         duration: 90 * D,
         easing: Easing.out(Easing.quad),
       }),
-      withTiming(1.15, {
-        duration: 160 * D,
-        easing: Easing.inOut(Easing.quad),
-      }),
+      withTiming(1.0, { duration: 160 * D, easing: Easing.inOut(Easing.quad) }),
     );
     sparkleRotate.value = withSequence(
       withTiming(tapRot, { duration: 90 * D, easing: Easing.out(Easing.quad) }),
@@ -296,13 +365,20 @@ export default function AIBadge({
 
     if (viewRef.current) {
       viewRef.current.measureInWindow((x, y, width, height) => {
-        onPress?.({ x, y, width, height }, score);
+        const rect = { x, y, width, height };
+        if (aiData && showAIModal) {
+          showAIModal(rect, aiData, score, sourceId);
+        } else if (onPress) {
+          onPress(rect, score);
+        }
       });
     }
   };
 
+  // Pill transform combines pillScale (tap/breath) × returnScale (close return)
   const pillAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pillScale.value }],
+    transform: [{ scale: pillScale.value * returnScale.value }],
+    opacity: hideOpacity.value,
   }));
 
   const dotAnimStyle = useAnimatedStyle(() => ({
@@ -564,7 +640,7 @@ export default function AIBadge({
                 width: sizing.dotSize,
                 height: sizing.dotSize,
                 borderRadius: sizing.dotSize / 2,
-                backgroundColor: dotBg, // now uses 0.75 alpha rgba
+                backgroundColor: dotBg,
               },
               dotAnimStyle,
             ]}
@@ -576,10 +652,7 @@ export default function AIBadge({
 }
 
 const styles = StyleSheet.create({
-  wrapper: {
-    position: "relative",
-    alignSelf: "flex-start",
-  },
+  wrapper: { position: "relative", alignSelf: "flex-start" },
   pill: {
     flexDirection: "row",
     alignItems: "center",
@@ -613,19 +686,14 @@ const styles = StyleSheet.create({
     bottom: "15%",
     width: undefined,
   },
-  ribbonGradient: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  ribbonGradient: { ...StyleSheet.absoluteFillObject },
   edgeLight: {
     ...StyleSheet.absoluteFillObject,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: "rgba(255, 255, 255, 0.45)",
     borderRadius: 9999,
   },
-  shineContainer: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: "hidden",
-  },
+  shineContainer: { ...StyleSheet.absoluteFillObject, overflow: "hidden" },
   shineBand: {
     position: "absolute",
     top: 0,
@@ -634,7 +702,6 @@ const styles = StyleSheet.create({
     width: 85,
     transform: [{ rotate: "15deg" }],
   },
-  // Lighter score text: #4a453c → #8a857c (warm light gray)
   scoreText: {
     fontWeight: "500",
     color: "#8a857c",
@@ -662,8 +729,5 @@ const styles = StyleSheet.create({
     bottom: 0,
     textAlign: "center",
   },
-  sparkleGlyph: {
-    fontWeight: "600",
-    textAlign: "center",
-  },
+  sparkleGlyph: { fontWeight: "600", textAlign: "center" },
 });

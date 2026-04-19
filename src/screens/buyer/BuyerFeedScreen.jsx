@@ -1,17 +1,18 @@
-import React, { useState, useCallback } from "react";
-import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  FlatList,
-  Image,
-  ActivityIndicator,
-  RefreshControl,
-  ScrollView,
-} from "react-native";
+import React, { useState, useCallback, useRef, useEffect } from "react";
+import { View, Text, StyleSheet, FlatList, RefreshControl } from "react-native";
+import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  interpolate,
+  Easing,
+} from "react-native-reanimated";
 import { useAuth } from "../../hooks/useAuth";
 import {
   getActiveListings,
@@ -23,19 +24,48 @@ import { formatZAR } from "../../utils/formatters";
 import { timeAgo } from "../../utils/dateUtils";
 import { CATEGORY_ICONS } from "../../services/marketPriceService";
 import { colors, spacing, fonts, radius } from "../../config/theme";
+import TactilePressable from "../../components/shared/TactilePressable";
+import FadeSlideIn from "../../components/shared/FadeSlideIn";
+import SkeletonCard from "../../components/shared/SkeletonCard";
+import FadeEdgeScroll from "../../components/shared/FadeEdgeScroll";
+import ScrollAwareCard from "../../components/shared/ScrollAwareCard";
+import { haptic } from "../../utils/haptics";
+
+// Session-scoped cascade flag
+let cascadeHasPlayed = false;
+const PLACEHOLDER_BLURHASH = "L6PZfSi_.AyE_3t7t7R**0o#DgR4";
 
 /**
- * Buyer Feed — the heart of GreenBidder's buyer experience.
+ * ═══════════════════════════════════════════════════════════════════════
+ *   PulsingSparkle — gentle ambient pulse on the ✨ emoji
  *
- * Layout:
- *   Header with title + search icon
- *   Category filter chips
- *   Recommendations row (Picked for You / Popular Now)
- *   Latest listings feed
- *
- * Criterion 8 — CRUD Read, end-to-end
- * Criterion 3 — Parallel queries, joins, no N+1
+ *   Opacity 0.7 ↔ 1.0 + scale 0.96 ↔ 1.02. 2.4s cycle.
+ *   Quiet enough to feel ambient, visible enough to read as "alive".
+ *   Only used on the "Picked for You" header — it's an AI moment.
+ * ═══════════════════════════════════════════════════════════════════════
  */
+function PulsingSparkle({ style }) {
+  const breath = useSharedValue(0);
+
+  useEffect(() => {
+    breath.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      false,
+    );
+  }, []);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(breath.value, [0, 1], [0.7, 1.0]),
+    transform: [{ scale: interpolate(breath.value, [0, 1], [0.96, 1.02]) }],
+  }));
+
+  return <Animated.Text style={[style, pulseStyle]}>✨</Animated.Text>;
+}
+
 export default function BuyerFeedScreen({ navigation }) {
   const { profileId, isBuyer } = useAuth();
 
@@ -48,6 +78,9 @@ export default function BuyerFeedScreen({ navigation }) {
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+
+  const isFirstMount = useRef(!cascadeHasPlayed);
 
   useFocusEffect(
     useCallback(() => {
@@ -77,6 +110,11 @@ export default function BuyerFeedScreen({ navigation }) {
     if (listResult.data) setListings(listResult.data);
 
     setIsLoading(false);
+    setHasLoadedOnce(true);
+
+    if (isFirstMount.current) {
+      cascadeHasPlayed = true;
+    }
   };
 
   const loadFilteredListings = async (categoryId) => {
@@ -90,6 +128,9 @@ export default function BuyerFeedScreen({ navigation }) {
 
   const handleCategoryPress = (catId) => {
     const newCategory = selectedCategory === catId ? null : catId;
+    if (newCategory !== selectedCategory) {
+      haptic.selection();
+    }
     setSelectedCategory(newCategory);
 
     if (newCategory) {
@@ -113,26 +154,39 @@ export default function BuyerFeedScreen({ navigation }) {
     setIsRefreshing(false);
   };
 
-  // ── Header with search icon ──
+  const EntranceWrapper = ({ delay = 0, children, ...rest }) => {
+    if (isFirstMount.current && hasLoadedOnce) {
+      return (
+        <FadeSlideIn delay={delay} {...rest}>
+          {children}
+        </FadeSlideIn>
+      );
+    }
+    return <View {...rest}>{children}</View>;
+  };
+
+  // ── Header ──
   const renderHeader = () => (
-    <View style={styles.header}>
-      <View style={styles.headerRow}>
-        <View style={styles.headerTitles}>
-          <Text style={styles.title}>Fresh Produce</Text>
-          <Text style={styles.subtitle}>Direct from local farmers</Text>
+    <EntranceWrapper delay={0}>
+      <View style={styles.header}>
+        <View style={styles.headerRow}>
+          <View style={styles.headerTitles}>
+            <Text style={styles.title}>Fresh Produce</Text>
+            <Text style={styles.subtitle}>Direct from local farmers</Text>
+          </View>
+          <TactilePressable
+            style={styles.searchButton}
+            variant="compact"
+            onPress={() => navigation.navigate("Search")}
+          >
+            <Text style={styles.searchButtonIcon}>🔍</Text>
+          </TactilePressable>
         </View>
-        <TouchableOpacity
-          style={styles.searchButton}
-          onPress={() => navigation.navigate("Search")}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.searchButtonIcon}>🔍</Text>
-        </TouchableOpacity>
       </View>
-    </View>
+    </EntranceWrapper>
   );
 
-  // ── Recommendation Card ──
+  // ── Recommendation card ──
   const renderRecommendationCard = (item) => {
     const primaryImage = item.listing_images?.find((img) => img.is_primary);
     const imageUrl =
@@ -141,16 +195,23 @@ export default function BuyerFeedScreen({ navigation }) {
     const icon = CATEGORY_ICONS[item.produce_categories?.name] || "🌿";
 
     return (
-      <TouchableOpacity
+      <TactilePressable
         key={item.id}
         style={styles.recCard}
+        variant="compact"
         onPress={() =>
           navigation.navigate("ListingDetail", { listingId: item.id })
         }
-        activeOpacity={0.85}
       >
         {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.recImage} />
+          <Image
+            source={imageUrl}
+            style={styles.recImage}
+            contentFit="cover"
+            transition={200}
+            placeholder={PLACEHOLDER_BLURHASH}
+            cachePolicy="memory-disk"
+          />
         ) : (
           <View style={styles.recImagePlaceholder}>
             <Text style={styles.recPlaceholderEmoji}>{icon}</Text>
@@ -177,7 +238,7 @@ export default function BuyerFeedScreen({ navigation }) {
             {item.farmer_profiles?.farm_name}
           </Text>
         </View>
-      </TouchableOpacity>
+      </TactilePressable>
     );
   };
 
@@ -185,12 +246,22 @@ export default function BuyerFeedScreen({ navigation }) {
     if (selectedCategory || recommendations.length === 0) return null;
 
     return (
-      <View style={styles.recSection}>
-        <View style={styles.recHeader}>
-          <View>
-            <Text style={styles.recSectionTitle}>
-              {isPersonalised ? "✨ Picked for You" : "🔥 Popular Right Now"}
-            </Text>
+      <EntranceWrapper delay={160}>
+        <View style={styles.recSection}>
+          <View style={styles.recHeader}>
+            <View style={styles.recTitleRow}>
+              {isPersonalised ? (
+                <>
+                  <PulsingSparkle style={styles.recSparkle} />
+                  <Text style={styles.recSectionTitle}>Picked for You</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.recFireEmoji}>🔥</Text>
+                  <Text style={styles.recSectionTitle}>Popular Right Now</Text>
+                </>
+              )}
+            </View>
             {isPersonalised && profileSummary?.topCategories?.length > 0 ? (
               <Text style={styles.recSectionHint}>
                 Based on your interest in{" "}
@@ -207,95 +278,130 @@ export default function BuyerFeedScreen({ navigation }) {
               </Text>
             ) : null}
           </View>
-        </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.recScroll}
-        >
-          {recommendations.map(renderRecommendationCard)}
-        </ScrollView>
-      </View>
+          <FadeEdgeScroll
+            snapInterval={172}
+            fadeWidth={24}
+            contentPaddingLeft={spacing.md - 4}
+            contentPaddingRight={spacing.md}
+            backgroundColor={colors.backgroundSecondary}
+          >
+            {(scrollX, viewportWidth) =>
+              recommendations.map((item, i) => (
+                <ScrollAwareCard
+                  key={item.id}
+                  index={i}
+                  scrollX={scrollX}
+                  viewportWidth={viewportWidth}
+                  cardWidth={160}
+                  snapInterval={172}
+                  contentOffset={spacing.md - 4}
+                >
+                  {renderRecommendationCard(item)}
+                </ScrollAwareCard>
+              ))
+            }
+          </FadeEdgeScroll>
+        </View>
+      </EntranceWrapper>
     );
   };
 
-  const renderListing = ({ item }) => {
+  // ── Listing card ──
+  const renderListing = ({ item, index }) => {
     const primaryImage = item.listing_images?.find((img) => img.is_primary);
     const imageUrl =
       primaryImage?.image_url || item.listing_images?.[0]?.image_url;
     const aiScore = item.ai_analysis?.condition_score;
 
+    const shouldAnimate = isFirstMount.current && index < 3;
+    const cardDelay = 260 + index * 80;
+
+    const CardWrapper = shouldAnimate ? FadeSlideIn : View;
+    const wrapperProps = shouldAnimate ? { delay: cardDelay } : {};
+
     return (
-      <TouchableOpacity
-        style={styles.card}
-        onPress={() =>
-          navigation.navigate("ListingDetail", { listingId: item.id })
-        }
-        activeOpacity={0.8}
-      >
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.cardImage} />
-        ) : (
-          <View style={styles.cardImagePlaceholder}>
-            <Text style={styles.placeholderText}>No photo</Text>
-          </View>
-        )}
+      <CardWrapper {...wrapperProps}>
+        <TactilePressable
+          style={styles.card}
+          variant="card"
+          onPress={() =>
+            navigation.navigate("ListingDetail", { listingId: item.id })
+          }
+        >
+          {imageUrl ? (
+            <Image
+              source={imageUrl}
+              style={styles.cardImage}
+              contentFit="cover"
+              transition={200}
+              placeholder={PLACEHOLDER_BLURHASH}
+              cachePolicy="memory-disk"
+            />
+          ) : (
+            <View style={styles.cardImagePlaceholder}>
+              <Text style={styles.placeholderText}>No photo</Text>
+            </View>
+          )}
 
-        {aiScore ? (
-          <View style={styles.aiBadge}>
-            <Text style={styles.aiBadgeText}>AI {aiScore}/10</Text>
-          </View>
-        ) : null}
+          {aiScore ? (
+            <View style={styles.aiBadge}>
+              <Text style={styles.aiBadgeText}>AI {aiScore}/10</Text>
+            </View>
+          ) : null}
 
-        <View style={styles.cardContent}>
-          <View style={styles.cardTopRow}>
-            <Text style={styles.categoryLabel}>
-              {item.produce_categories?.name}
+          <View style={styles.cardContent}>
+            <View style={styles.cardTopRow}>
+              <Text style={styles.categoryLabel}>
+                {item.produce_categories?.name}
+              </Text>
+              {item.farmer_profiles?.is_verified ? (
+                <Text style={styles.verifiedBadge}>✓ Verified</Text>
+              ) : null}
+            </View>
+
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {item.title}
             </Text>
-            {item.farmer_profiles?.is_verified ? (
-              <Text style={styles.verifiedBadge}>✓ Verified</Text>
-            ) : null}
-          </View>
 
-          <Text style={styles.cardTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
+            <View style={styles.cardPriceRow}>
+              <Text style={styles.cardPrice}>
+                {formatZAR(item.price)}/{item.unit}
+              </Text>
+              <Text style={styles.cardQuantity}>
+                {item.quantity} {item.unit}s
+              </Text>
+            </View>
 
-          <View style={styles.cardPriceRow}>
-            <Text style={styles.cardPrice}>
-              {formatZAR(item.price)}/{item.unit}
-            </Text>
-            <Text style={styles.cardQuantity}>
-              {item.quantity} {item.unit}s
-            </Text>
+            <View style={styles.cardBottomRow}>
+              <Text style={styles.farmName}>
+                {item.farmer_profiles?.farm_name}
+              </Text>
+              <Text style={styles.timeText}>{timeAgo(item.created_at)}</Text>
+            </View>
           </View>
-
-          <View style={styles.cardBottomRow}>
-            <Text style={styles.farmName}>
-              {item.farmer_profiles?.farm_name}
-            </Text>
-            <Text style={styles.timeText}>{timeAgo(item.created_at)}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
+        </TactilePressable>
+      </CardWrapper>
     );
   };
 
+  // ── "Latest Listings" divider ──
   const renderFeedHeader = () => (
     <View>
       {renderRecommendationSection()}
-      <View style={styles.sectionDivider}>
-        <Text style={styles.sectionLabel}>
-          {selectedCategory
-            ? categories.find((c) => c.id === selectedCategory)?.name ||
-              "Filtered"
-            : "Latest Listings"}
-        </Text>
-        <Text style={styles.sectionCount}>
-          {listings.length} listing{listings.length !== 1 ? "s" : ""}
-        </Text>
-      </View>
+      <EntranceWrapper delay={240}>
+        <View style={styles.sectionDivider}>
+          <Text style={styles.sectionLabel}>
+            {selectedCategory
+              ? categories.find((c) => c.id === selectedCategory)?.name ||
+                "Filtered"
+              : "Latest Listings"}
+          </Text>
+          <View style={styles.sectionCountPill}>
+            <Text style={styles.sectionCountText}>{listings.length}</Text>
+          </View>
+        </View>
+      </EntranceWrapper>
     </View>
   );
 
@@ -311,53 +417,76 @@ export default function BuyerFeedScreen({ navigation }) {
     </View>
   );
 
+  // ── Loading ──
   if (isLoading && listings.length === 0) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView style={styles.safe} edges={["top"]}>
         {renderHeader()}
-        <View style={styles.loader}>
-          <ActivityIndicator size="large" color={colors.primary} />
+        <View style={styles.categoryRowContainer}>
+          <View style={[styles.chipPlaceholder, { width: 60 }]} />
+          <View style={[styles.chipPlaceholder, { width: 80 }]} />
+          <View style={[styles.chipPlaceholder, { width: 90 }]} />
+          <View style={[styles.chipPlaceholder, { width: 70 }]} />
+        </View>
+        <View style={styles.skeletonList}>
+          <SkeletonCard delay={0} />
+          <SkeletonCard delay={120} />
+          <SkeletonCard delay={240} />
         </View>
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    // edges={["top"]} only — the tab navigator handles bottom inset itself.
+    // Without this restriction we get double safe-area padding = visible gap.
+    <SafeAreaView style={styles.safe} edges={["top"]}>
       {renderHeader()}
 
-      {/* Category filter chips */}
-      <FlatList
-        horizontal
-        data={[{ id: null, name: "All" }, ...categories]}
-        keyExtractor={(item) => item.id || "all"}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.categoryList}
-        style={{ maxHeight: 52 }}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[
-              styles.categoryChip,
-              (item.id === null
-                ? selectedCategory === null
-                : selectedCategory === item.id) && styles.categoryChipSelected,
-            ]}
-            onPress={() => handleCategoryPress(item.id)}
-          >
-            <Text
-              style={[
-                styles.categoryChipText,
-                (item.id === null
+      <EntranceWrapper delay={80}>
+        <View style={styles.categoryRowWrapper}>
+          <FlatList
+            horizontal
+            data={[{ id: null, name: "All" }, ...categories]}
+            keyExtractor={(item) => item.id || "all"}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.categoryList}
+            style={{ maxHeight: 52 }}
+            renderItem={({ item }) => {
+              const isSelected =
+                item.id === null
                   ? selectedCategory === null
-                  : selectedCategory === item.id) &&
-                  styles.categoryChipTextSelected,
-              ]}
-            >
-              {item.name}
-            </Text>
-          </TouchableOpacity>
-        )}
-      />
+                  : selectedCategory === item.id;
+              return (
+                <TactilePressable
+                  style={[
+                    styles.categoryChip,
+                    isSelected && styles.categoryChipSelected,
+                  ]}
+                  variant="compact"
+                  onPress={() => handleCategoryPress(item.id)}
+                >
+                  <Text
+                    style={[
+                      styles.categoryChipText,
+                      isSelected && styles.categoryChipTextSelected,
+                    ]}
+                  >
+                    {item.name}
+                  </Text>
+                </TactilePressable>
+              );
+            }}
+          />
+          <LinearGradient
+            colors={[colors.background + "00", colors.background]}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.chipEdgeFade}
+            pointerEvents="none"
+          />
+        </View>
+      </EntranceWrapper>
 
       <FlatList
         data={listings}
@@ -366,11 +495,13 @@ export default function BuyerFeedScreen({ navigation }) {
         contentContainerStyle={styles.list}
         ListHeaderComponent={renderFeedHeader}
         ListEmptyComponent={renderEmpty}
+        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
             onRefresh={handleRefresh}
             tintColor={colors.primary}
+            colors={[colors.primary]}
           />
         }
       />
@@ -379,10 +510,14 @@ export default function BuyerFeedScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
+  // Background matches the feed list background — no visible colour band
+  // between the scroll area and the tab bar.
   safe: { flex: 1, backgroundColor: colors.backgroundSecondary },
 
+  // ── Header ──
   header: {
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
     paddingBottom: spacing.sm,
     backgroundColor: colors.background,
   },
@@ -392,7 +527,12 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   headerTitles: { flex: 1 },
-  title: { fontSize: fonts.h1, fontWeight: "700", color: colors.textPrimary },
+  title: {
+    fontSize: fonts.h1,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    letterSpacing: -0.5,
+  },
   subtitle: {
     fontSize: fonts.caption,
     color: colors.textSecondary,
@@ -410,10 +550,27 @@ const styles = StyleSheet.create({
   },
   searchButtonIcon: { fontSize: 18 },
 
+  // ── Category row ──
+  categoryRowWrapper: {
+    position: "relative",
+    backgroundColor: colors.background,
+  },
   categoryList: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
+  },
+  categoryRowContainer: {
+    flexDirection: "row",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
     backgroundColor: colors.background,
+    gap: spacing.sm,
+  },
+  chipPlaceholder: {
+    height: 36,
+    borderRadius: radius.full,
+    backgroundColor: colors.backgroundTertiary,
+    opacity: 0.6,
   },
   categoryChip: {
     paddingHorizontal: spacing.md,
@@ -432,33 +589,62 @@ const styles = StyleSheet.create({
   },
   categoryChipText: { fontSize: fonts.caption, color: colors.textSecondary },
   categoryChipTextSelected: { color: colors.primaryDark, fontWeight: "600" },
+  chipEdgeFade: {
+    position: "absolute",
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: 32,
+  },
 
-  loader: { flex: 1, justifyContent: "center", alignItems: "center" },
-
-  recSection: { marginBottom: spacing.md },
+  // ── Recommendations ──
+  recSection: {
+    marginTop: spacing.md,
+    marginBottom: spacing.sm,
+  },
+  // Align section text to the same left edge as listing cards (spacing.md
+  // in the list padding). Previously had md horizontal padding which looked
+  // unanchored next to the lg-padded header.
   recHeader: {
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
+  },
+  recTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs + 2, // small deliberate gap between emoji + text
+  },
+  recSparkle: {
+    fontSize: fonts.h3,
+  },
+  recFireEmoji: {
+    fontSize: fonts.h3,
   },
   recSectionTitle: {
     fontSize: fonts.h3,
     fontWeight: "700",
     color: colors.textPrimary,
+    letterSpacing: -0.2,
   },
   recSectionHint: {
     fontSize: fonts.small,
     color: colors.textSecondary,
-    marginTop: 2,
+    marginTop: 4,
+    marginLeft: 2,
   },
   recScroll: {
-    paddingLeft: spacing.md,
-    paddingRight: spacing.sm,
+    // Nudged 4px left of spacing.md so the rec card's visual edge (border +
+    // shadow optical spacing) lines up precisely with the listing card
+    // below it. Header above stays at spacing.md — it's text, no border.
+    paddingLeft: spacing.md - 4,
+    paddingRight: spacing.md,
+    paddingVertical: spacing.xs,
   },
   recCard: {
     width: 160,
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    marginRight: spacing.sm,
+    marginRight: 12, // snap math: 160 + 12 = 172
     borderWidth: 1,
     borderColor: colors.borderLight,
     overflow: "hidden",
@@ -510,23 +696,48 @@ const styles = StyleSheet.create({
   },
   recFarm: { fontSize: 10, color: colors.textTertiary, marginTop: 2 },
 
+  // ── Section divider ──
   sectionDivider: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
   },
   sectionLabel: {
     fontSize: fonts.h3,
     fontWeight: "700",
     color: colors.textPrimary,
+    letterSpacing: -0.2,
   },
-  sectionCount: { fontSize: fonts.small, color: colors.textTertiary },
+  sectionCountPill: {
+    backgroundColor: colors.backgroundTertiary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: radius.full,
+    minWidth: 28,
+    alignItems: "center",
+  },
+  sectionCountText: {
+    fontSize: fonts.small,
+    fontWeight: "600",
+    color: colors.textSecondary,
+  },
 
-  list: { padding: spacing.md, paddingTop: 0 },
+  // ── Main list ──
+  // No explicit paddingBottom — React Navigation's tab bar automatically
+  // inserts its height as contentInset. Adding our own padding on top
+  // of that creates a visible gap.
+  list: {
+    paddingHorizontal: spacing.md,
+  },
+  skeletonList: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+  },
   card: {
-    backgroundColor: colors.background,
+    backgroundColor: colors.surface,
     borderRadius: radius.lg,
     overflow: "hidden",
     marginBottom: spacing.md,
@@ -575,6 +786,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.textPrimary,
     marginBottom: spacing.sm,
+    letterSpacing: -0.2,
   },
   cardPriceRow: {
     flexDirection: "row",
@@ -596,6 +808,7 @@ const styles = StyleSheet.create({
   farmName: { fontSize: fonts.caption, color: colors.textSecondary },
   timeText: { fontSize: fonts.small, color: colors.textTertiary },
 
+  // ── Empty ──
   empty: {
     alignItems: "center",
     paddingTop: spacing.xxl,

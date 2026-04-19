@@ -1,4 +1,5 @@
 import React from "react";
+import { StyleSheet } from "react-native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { Home, BarChart3, PlusCircle, User, Heart } from "lucide-react-native";
@@ -24,11 +25,7 @@ const Tab = createBottomTabNavigator();
 const FeedStack = createNativeStackNavigator();
 const ListingsStack = createNativeStackNavigator();
 const SavedStack = createNativeStackNavigator();
-9;
-/**
- * Buyer flow: Feed → Listing Detail
- * Tapping a listing card in the feed navigates to its full detail view.
- */
+
 function FeedStackScreen() {
   return (
     <FeedStack.Navigator screenOptions={{ headerShown: false }}>
@@ -39,10 +36,6 @@ function FeedStackScreen() {
   );
 }
 
-/**
- * Farmer flow: My Listings → Create / Edit / Detail
- * Farmer manages their own listings from this stack.
- */
 function ListingsStackScreen() {
   return (
     <ListingsStack.Navigator screenOptions={{ headerShown: false }}>
@@ -76,11 +69,16 @@ function SavedStackScreen() {
  * Main tab navigator — role-aware.
  *
  * Farmer sees:  Feed | Prices | Create | Profile
- * Buyer sees:   Feed | Prices | Profile
+ * Buyer sees:   Feed | Prices | Saved | Profile
  *
- * The Create tab is only available to farmers — buyers browse
- * listings from the Feed tab. This enforces RBAC at the UI level
- * (Criterion 4) while RLS enforces it at the database level.
+ * Stage 1a polish:
+ *   • Proper hairline top border on the tab bar so it reads as a real edge,
+ *     not a floating bar with a gap above it.
+ *   • Tab bar uses system-default sizing (no hard-coded height) so the safe
+ *     area at the bottom of the iPhone is handled natively. The previous
+ *     hard-coded height=60 was causing a visible gap between the feed
+ *     content and the tab bar.
+ *   • Background matches app surface so there's no contrast band.
  */
 export default function MainTabs() {
   const { userRole } = useAuth();
@@ -93,14 +91,16 @@ export default function MainTabs() {
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textTertiary,
         tabBarStyle: {
-          height: 60,
-          paddingBottom: 8,
-          paddingTop: 4,
+          backgroundColor: colors.background,
+          borderTopWidth: StyleSheet.hairlineWidth,
           borderTopColor: colors.borderLight,
+          // No hard-coded height — let the system handle safe area inset
+          // so there's no phantom gap between content and tab bar.
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: 11,
           fontWeight: "500",
+          letterSpacing: 0.2,
         },
       }}
     >

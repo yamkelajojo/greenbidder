@@ -16,48 +16,53 @@ import { haptic } from "../../utils/haptics";
  *
  *     • Spring-physics compression on press (scale + lift)
  *     • Optional haptic feedback (off by default — opt-in per instance)
- *     • UI-thread animation via Reanimated (zero bridge traffic, 60-120fps)
- *
- *   Philosophy: compression is visual feedback that EVERY tap deserves.
- *   Haptics are for decisive moments only — committing an action, toggling
- *   state, errors, success. Not for navigation or list browsing.
- *
- *   ─── Press spec ────────────────────────────────────────────────
- *   Press-in  : snap to compressed state in ~70ms (stiff, low damping)
- *   Press-out : return to rest in ~150ms (snappy, high damping, no bounce)
+ *     • UI-thread animation via Reanimated
  *
  *   ─── Variants ──────────────────────────────────────────────────
- *   default    → compress (0.97) + lift (-1px). Primary buttons, cards.
- *   compact    → compress (0.98) only, no lift. Chips, list rows, small tappables.
+ *   default    → compress (0.97) + lift (-1px). Buttons, small cards.
+ *   compact    → compress (0.98) only. Chips, list rows, small tappables.
+ *   card       → compress (0.985) only, gentle spring. Big content cards.
+ *                Lifts read as "floaty" on large surfaces — use card
+ *                variant when the user presses a full-width listing card.
  *   assertive  → compress (0.95) + sink (+1px). Destructive actions.
  *
  *   ─── Haptic ───────────────────────────────────────────────────
- *   Off by default. Pass `haptic` prop to enable:
- *     <TactilePressable haptic onPress={handleSubmit}> → light tap on press-in
- *     <TactilePressable haptic="commit" ...>           → medium haptic
- *     <TactilePressable haptic="success" ...>          → success pattern
- *
- *   Usage:
- *     <TactilePressable onPress={navigate}>Tap me</TactilePressable>
- *     <TactilePressable haptic onPress={submit}>Submit</TactilePressable>
- *     <TactilePressable haptic="success" onPress={save}>Save</TactilePressable>
+ *   Off by default. Pass haptic prop to enable:
+ *     <TactilePressable haptic onPress={...}>           light tap
+ *     <TactilePressable haptic="commit" onPress={...}>  medium
+ *     <TactilePressable haptic="success" ...>           success pattern
+ *     <TactilePressable haptic="selection" ...>         toggle tick
  * ═══════════════════════════════════════════════════════════════════════
  */
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-// Snappy press-in: fast, slight overshoot
+// Default press-in: fast, slight overshoot
 const PRESS_IN_SPRING = {
   damping: 18,
   stiffness: 450,
   mass: 0.5,
 };
 
-// Snappy release: fast, no bounce
+// Default press-out: snappy, no bounce
 const PRESS_OUT_SPRING = {
   damping: 22,
   stiffness: 400,
   mass: 0.6,
+};
+
+// Card-specific: slower, weightier — big surfaces need more inertia
+// to feel "pressed into the page" rather than floating.
+const CARD_PRESS_IN_SPRING = {
+  damping: 24,
+  stiffness: 320,
+  mass: 0.7,
+};
+
+const CARD_PRESS_OUT_SPRING = {
+  damping: 26,
+  stiffness: 280,
+  mass: 0.75,
 };
 
 export default function TactilePressable({
@@ -77,11 +82,14 @@ export default function TactilePressable({
   const config = (() => {
     switch (variant) {
       case "compact":
-        return { scale: pressScale ?? 0.98, lift: 0 };
+        return { scale: pressScale ?? 0.98, lift: 0, useCardSpring: false };
+      case "card":
+        // Cards: light compression, zero lift, weightier spring
+        return { scale: pressScale ?? 0.985, lift: 0, useCardSpring: true };
       case "assertive":
-        return { scale: pressScale ?? 0.95, lift: 1 };
+        return { scale: pressScale ?? 0.95, lift: 1, useCardSpring: false };
       default:
-        return { scale: pressScale ?? 0.97, lift: -1 };
+        return { scale: pressScale ?? 0.97, lift: -1, useCardSpring: false };
     }
   })();
 
@@ -93,14 +101,6 @@ export default function TactilePressable({
     };
   });
 
-  /**
-   * Resolve haptic from prop. Supports:
-   *   true       → haptic.tap() on press-in
-   *   "tap"      → haptic.tap()
-   *   "commit"   → haptic.commit()
-   *   "success"  → haptic.success() (fires on press-in; for decisive buttons)
-   *   false/unset → no haptic
-   */
   const fireHaptic = () => {
     if (!hapticMode) return;
     if (hapticMode === true || hapticMode === "tap") haptic.tap();
@@ -113,7 +113,10 @@ export default function TactilePressable({
 
   const handlePressIn = (e) => {
     if (!disabled) {
-      pressed.value = withSpring(1, PRESS_IN_SPRING);
+      const inSpring = config.useCardSpring
+        ? CARD_PRESS_IN_SPRING
+        : PRESS_IN_SPRING;
+      pressed.value = withSpring(1, inSpring);
       fireHaptic();
     }
     externalPressIn?.(e);
@@ -121,7 +124,10 @@ export default function TactilePressable({
 
   const handlePressOut = (e) => {
     if (!disabled) {
-      pressed.value = withSpring(0, PRESS_OUT_SPRING);
+      const outSpring = config.useCardSpring
+        ? CARD_PRESS_OUT_SPRING
+        : PRESS_OUT_SPRING;
+      pressed.value = withSpring(0, outSpring);
     }
     externalPressOut?.(e);
   };

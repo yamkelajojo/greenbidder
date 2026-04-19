@@ -13,6 +13,7 @@ import Animated, {
   Extrapolation,
 } from "react-native-reanimated";
 import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
 import { scoreToHex, scoreToColor } from "../../utils/scoreColor";
 import { useAIModal } from "./AIModalContext";
 
@@ -260,13 +261,26 @@ export default function AIBadge({
     [isActiveSource, isModalOpen],
   );
 
-  useFrameCallback((frameInfo) => {
+  // Frame loop — stores the returned handle so we can pause it when
+  // this badge is hidden (absorbed into modal). Saves UI-thread cycles
+  // especially when many badges are on screen.
+  const frameLoop = useFrameCallback((frameInfo) => {
     const dt = (frameInfo.timeSincePreviousFrame ?? 16) / 1000;
     motionTime.value += dt * SPEED_MULT;
     if (boost.value > 0.001) {
       boost.value = Math.max(0, boost.value - dt * 1.1);
     }
-  });
+  }, true);
+
+  // Pause the frame loop when this badge is hidden (active modal source).
+  // Every badge normally runs a 60fps callback doing sine math for its
+  // ribbon. When a badge has been "absorbed" into the modal, nothing is
+  // visible, so the math is wasted. Resume when it becomes visible again.
+  useEffect(() => {
+    if (!frameLoop) return;
+    const shouldRun = !(isActiveSource && isModalOpen);
+    frameLoop.setActive(shouldRun);
+  }, [isActiveSource, isModalOpen]);
 
   useEffect(() => {
     pillScale.value = withSequence(
@@ -322,6 +336,14 @@ export default function AIBadge({
 
   const handlePress = () => {
     if (disabled) return;
+
+    // ─── Haptic: tap feedback ───
+    // Fire Light impact only when this badge will actually open a modal
+    // (aiData present + context available). Otherwise the Lab's
+    // coordinate-capture taps would vibrate for no user-visible reason.
+    if (aiData && showAIModal) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
 
     pillScale.value = withSequence(
       withTiming(1.18, { duration: 90, easing: Easing.out(Easing.quad) }),

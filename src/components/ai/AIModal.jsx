@@ -16,6 +16,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
+import * as Haptics from "expo-haptics";
 import { X } from "lucide-react-native";
 import { useAIModal } from "./AIModalContext";
 import { scoreToHex, scoreToColor } from "../../utils/scoreColor";
@@ -88,9 +89,9 @@ const DOT_SPRING = {
 };
 
 const PRESS_SPRING = {
-  damping: 15,
-  stiffness: 400,
-  mass: 0.5,
+  damping: 14,
+  stiffness: 600, // was 400 — snappier
+  mass: 0.4, // was 0.5
 };
 
 // Ribbon motion
@@ -134,12 +135,15 @@ function buildGradientColors(score) {
 const GRADIENT_POSITIONS = [0, 0.12, 0.28, 0.48, 0.62, 0.76, 0.86, 1.0];
 
 function modalBackgroundForScore(score) {
-  if (score == null) return "rgba(252, 251, 248, 0.96)";
+  if (score == null) return "rgba(252, 251, 248, 0.82)";
   const [r, g, b] = scoreToColor(score);
   const mixR = Math.round(r * 0.04 + 255 * 0.96);
   const mixG = Math.round(g * 0.04 + 255 * 0.96);
   const mixB = Math.round(b * 0.04 + 255 * 0.96);
-  return `rgba(${mixR}, ${mixG}, ${mixB}, 0.96)`;
+  // Lowered from 0.96 → 0.82: makes the modal actually translucent.
+  // Without this, the modal reads as an opaque cream card with ribbon
+  // only in a strip — breaks the "glass object" illusion.
+  return `rgba(${mixR}, ${mixG}, ${mixB}, 0.82)`;
 }
 
 function modalShadowForScore(score) {
@@ -174,17 +178,20 @@ function CloseButton({ onPress, entranceStyle, leaveStyle }) {
   const iconRotate = useSharedValue(0);
 
   const handlePressIn = () => {
-    pressScale.value = withSpring(0.88, PRESS_SPRING);
-    pressGlow.value = withTiming(1, { duration: 180, easing: EASE_SETTLE });
+    pressScale.value = withSpring(0.86, PRESS_SPRING);
+    // Red pulse up — snappier, shorter
+    pressGlow.value = withTiming(1, { duration: 90, easing: EASE_TACTILE });
+    // Micro rotate the X — halved duration
     iconRotate.value = withSequence(
-      withTiming(-6, { duration: 120, easing: EASE_TACTILE }),
-      withTiming(0, { duration: 220, easing: EASE_SETTLE }),
+      withTiming(-5, { duration: 70, easing: EASE_TACTILE }),
+      withTiming(0, { duration: 130, easing: EASE_TACTILE }),
     );
   };
 
   const handlePressOut = () => {
     pressScale.value = withSpring(1, PRESS_SPRING);
-    pressGlow.value = withTiming(0, { duration: 380, easing: EASE_SETTLE });
+    // Red pulse down — faster fade
+    pressGlow.value = withTiming(0, { duration: 220, easing: EASE_TACTILE });
   };
 
   const buttonAnimStyle = useAnimatedStyle(() => ({
@@ -362,6 +369,13 @@ export default function AIModal() {
       qualityWordValues.forEach((v) => (v.value = 0));
 
       progress.value = withSpring(1, OPEN_SPRING);
+
+      // ─── Haptic: modal has arrived at center ───
+      // Fires ~380ms after open begins, roughly when the spring lands.
+      // Light Selection tick — confirmation of arrival, not heavy.
+      setTimeout(() => {
+        Haptics.selectionAsync().catch(() => {});
+      }, 380);
 
       // ═══ V7 ENTRANCES — calm, subtle, as the user loved ═══
       const T0 = 340;
@@ -732,6 +746,31 @@ function ModalInner({
     };
   });
 
+  // AMBIENT full-modal ribbon — very subtle, covers whole modal.
+  // Lives UNDER the mid-band ribbon. Gives the top (header area) and
+  // bottom (below storage) a quiet ambient glass shimmer so the whole
+  // modal feels like one continuous glass surface — not cream card with
+  // a strip of motion in the middle.
+  const ambientRibbonStyle = useAnimatedStyle(() => {
+    const t = ribbonTime.value;
+    const driftX =
+      Math.sin(t / (PHI * 1.8) + ribbonPhase + 1.3) * 20 * DIST_MULT;
+    const floatY = Math.sin(t / (SQRT2 * 1.4) + ribbonPhase) * 4 * DIST_MULT;
+    const opacityPhase = Math.sin(
+      t / (SQRT3 * 1.5) + ribbonPhase + Math.PI / 5,
+    );
+    // Much lower base opacity — ambient, not prominent
+    const baseOpacity = interpolate(opacityPhase, [-1, 1], [0.12, 0.22]);
+    return {
+      opacity: baseOpacity,
+      transform: [
+        { translateX: driftX },
+        { translateY: floatY },
+        { scale: 1.2 },
+      ],
+    };
+  });
+
   // ═══════════════════════════════════════════════════════════════
   //   Helper: leave-value-derived opacity and scale multipliers.
   //
@@ -1036,6 +1075,26 @@ function ModalInner({
 
       <Animated.View style={[morphStyle, styles.morphContainer]}>
         <View style={[StyleSheet.absoluteFill, { backgroundColor: modalBg }]}>
+          {/* Ambient full-modal ribbon — subtle, covers whole modal.
+              Gives the top and bottom sections (outside the mid-band)
+              a soft glass shimmer so the whole surface feels continuous. */}
+          <Animated.View
+            style={[
+              StyleSheet.absoluteFill,
+              styles.ambientRibbonLayer,
+              ambientRibbonStyle,
+            ]}
+            pointerEvents="none"
+          >
+            <LinearGradient
+              colors={gradientColors}
+              locations={GRADIENT_POSITIONS}
+              start={{ x: 0, y: 0.5 }}
+              end={{ x: 1, y: 0.5 }}
+              style={StyleSheet.absoluteFill}
+            />
+          </Animated.View>
+
           <View
             style={[
               styles.ribbonBand,
@@ -1232,6 +1291,13 @@ const styles = StyleSheet.create({
     right: 0,
     overflow: "hidden",
   },
+  // Ambient ribbon: covers entire modal, extends beyond edges so drift
+  // doesn't reveal transparent sides. Clipped by morphContainer's overflow.
+  ambientRibbonLayer: {
+    left: -50,
+    right: -50,
+    width: undefined,
+  },
   ribbonLayerUltraSoft: {
     ...StyleSheet.absoluteFillObject,
     left: -60,
@@ -1302,7 +1368,7 @@ const styles = StyleSheet.create({
   },
   closeButtonRedPulse: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(215, 95, 85, 0.7)",
+    backgroundColor: "rgba(220, 120, 110, 0.4)", // softer coral, lower alpha
     borderRadius: 14,
   },
   wordContainer: {

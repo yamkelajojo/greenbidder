@@ -141,6 +141,7 @@ export default function AIBadge({
   score = 0,
   aiData = null,
   onPress,
+  onPressIntercept, // NEW — parent can delay/prep before modal opens
   style,
   disabled = false,
   compact = false,
@@ -182,6 +183,20 @@ export default function AIBadge({
   const gradientColors = useMemo(() => buildGradientColors(score), [score]);
   const pillBg = useMemo(() => pillBackgroundForScore(score), [score]);
   const pillShadowColor = useMemo(() => pillShadowAlpha(score), [score]);
+
+  // Confidence multiplier — dims the badge's "alive" signals (sparkle glow,
+  // ribbon intensity) for low/medium AI confidence. Subtle honesty cue:
+  // the badge visibly "shines less" when the AI was less sure.
+  //   high   → 1.00 (full glow)
+  //   medium → 0.70
+  //   low    → 0.45
+  // Missing/null → treated as high.
+  const confidenceLevel = aiData?.raw_feedback?.confidence_level;
+  const confidenceMult = useMemo(() => {
+    if (confidenceLevel === "low") return 0.45;
+    if (confidenceLevel === "medium") return 0.7;
+    return 1.0;
+  }, [confidenceLevel]);
 
   // Track the previous active-source state so we can detect the transition
   // (was-active → no-longer-active), which is exactly when the modal has
@@ -389,7 +404,17 @@ export default function AIBadge({
       viewRef.current.measureInWindow((x, y, width, height) => {
         const rect = { x, y, width, height };
         if (aiData && showAIModal) {
-          showAIModal(rect, aiData, score, sourceId);
+          // onPressIntercept is an opt-in hook for parents who want to
+          // play a pre-modal animation (e.g., AnalyzingGlow). Called with
+          // { rect, score, aiData, openModal } — parent is responsible
+          // for eventually calling openModal() to trigger the morph.
+          // Without intercept, badge opens modal immediately as before.
+          if (onPressIntercept) {
+            const openModal = () => showAIModal(rect, aiData, score, sourceId);
+            onPressIntercept({ rect, score, aiData, openModal });
+          } else {
+            showAIModal(rect, aiData, score, sourceId);
+          }
         } else if (onPress) {
           onPress(rect, score);
         }
@@ -477,8 +502,11 @@ export default function AIBadge({
       (t * personality.ambientGlowSpeed) / SQRT2 + phase + Math.PI / 4,
     );
     const baseOpacity = interpolate(opacityPhase, [-1, 1], [0.55, 0.85]);
+    // Multiply everything by confidence — low-confidence AI glows less.
     return {
-      opacity: baseOpacity + sparkleGlowBoost.value * 0.3 + boost.value * 0.15,
+      opacity:
+        (baseOpacity + sparkleGlowBoost.value * 0.3 + boost.value * 0.15) *
+        confidenceMult,
     };
   });
 

@@ -1,24 +1,44 @@
+// src/navigation/RootNavigator.jsx (modify existing)
 import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import { useAuth } from "../hooks/useAuth";
+import { useOnboarding } from "../context/OnboardingContext";
 import AuthStack from "./AuthStack";
 import MainTabs from "./MainTabs";
-import { Spinner, YStack } from "tamagui";
+import OnboardingStack from "./OnboardingStack"; // NEW
 
 export default function RootNavigator() {
-  const { session, isLoading } = useAuth();
+  const { user, isLoading: authLoading } = useAuth();
+  const { isOnboardingComplete } = useOnboarding(); // NEW
 
-  if (isLoading) {
+  // Show loading while auth initializes
+  if (authLoading) {
+    return <LoadingScreen />; // You have this component
+  }
+
+  // Navigation logic
+  if (!user) {
+    // Not authenticated: show onboarding carousel first
     return (
-      <YStack flex={1} justifyContent="center" alignItems="center">
-        <Spinner size="large" color="$primary" />
-      </YStack>
+      <NavigationContainer>
+        <OnboardingStack />
+      </NavigationContainer>
     );
   }
 
+  if (!isOnboardingComplete) {
+    // Authenticated but onboarding incomplete: continue onboarding
+    return (
+      <NavigationContainer>
+        <OnboardingStack />
+      </NavigationContainer>
+    );
+  }
+
+  // Fully onboarded: show main app
   return (
     <NavigationContainer>
-      {session ? <MainTabs /> : <AuthStack />}
+      <MainTabs />
     </NavigationContainer>
   );
 }

@@ -10,7 +10,10 @@ import Animated, {
   withRepeat,
   withSequence,
   withTiming,
+  withSpring,
+  withDelay,
   interpolate,
+  Extrapolation,
   Easing,
 } from "react-native-reanimated";
 import { useAuth } from "../../hooks/useAuth";
@@ -29,6 +32,8 @@ import FadeSlideIn from "../../components/shared/FadeSlideIn";
 import SkeletonCard from "../../components/shared/SkeletonCard";
 import FadeEdgeScroll from "../../components/shared/FadeEdgeScroll";
 import ScrollAwareCard from "../../components/shared/ScrollAwareCard";
+import AIBadge from "../../components/ai/AIBadge";
+import AnalyzingGlow from "../../components/ai/AnalyzingGlow";
 import { haptic } from "../../utils/haptics";
 
 // Session-scoped cascade flag
@@ -38,10 +43,6 @@ const PLACEHOLDER_BLURHASH = "L6PZfSi_.AyE_3t7t7R**0o#DgR4";
 /**
  * ═══════════════════════════════════════════════════════════════════════
  *   PulsingSparkle — gentle ambient pulse on the ✨ emoji
- *
- *   Opacity 0.7 ↔ 1.0 + scale 0.96 ↔ 1.02. 2.4s cycle.
- *   Quiet enough to feel ambient, visible enough to read as "alive".
- *   Only used on the "Picked for You" header — it's an AI moment.
  * ═══════════════════════════════════════════════════════════════════════
  */
 function PulsingSparkle({ style }) {
@@ -64,6 +65,345 @@ function PulsingSparkle({ style }) {
   }));
 
   return <Animated.Text style={[style, pulseStyle]}>✨</Animated.Text>;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//   ListingCard — single feed card with local glow state
+//
+//   Lifted out of BuyerFeedScreen so each card owns its own
+//   analyzing-glow animation. When the AI badge is tapped:
+//     1. Glow activates around the card image (~500ms ramp)
+//     2. After 420ms, modal morph begins (via openModal from intercept)
+//     3. Glow continues playing, fades out naturally after ~1140ms total
+//
+//   Glow state lives per-card so tapping one listing doesn't light up
+//   all visible listings.
+// ═══════════════════════════════════════════════════════════════════════
+function ListingCard({ item, index, isFirstMount, onPress }) {
+  const [glowActive, setGlowActive] = useState(false);
+  const timeoutRef = useRef(null);
+
+  const primaryImage = item.listing_images?.find((img) => img.is_primary);
+  const imageUrl =
+    primaryImage?.image_url || item.listing_images?.[0]?.image_url;
+  const aiScore = item.ai_analysis?.condition_score;
+
+  const shouldAnimate = isFirstMount.current && index < 3;
+  const cardDelay = 260 + index * 80;
+
+  const CardWrapper = shouldAnimate ? FadeSlideIn : View;
+  const wrapperProps = shouldAnimate ? { delay: cardDelay } : {};
+
+  // Clean up any pending timeouts if component unmounts mid-sequence
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  const handleBadgeIntercept = ({ openModal }) => {
+    // Light up the card first
+    setGlowActive(true);
+
+    // After 420ms (glow is mostly built up but not at peak yet), trigger
+    // the modal morph. This timing means the glow is still playing during
+    // the morph — giving the user a sense that the AI is "presenting"
+    // its analysis from within the card itself.
+    timeoutRef.current = setTimeout(() => {
+      openModal();
+    }, 420);
+
+    // Let glow fade out naturally after the full sequence
+    timeoutRef.current = setTimeout(() => {
+      setGlowActive(false);
+    }, 1140);
+  };
+
+  return (
+    <CardWrapper {...wrapperProps}>
+      <AnalyzingGlow active={glowActive} radius={radius.lg} bleed={30}>
+        <TactilePressable style={styles.card} variant="card" onPress={onPress}>
+          {imageUrl ? (
+            <Image
+              source={imageUrl}
+              style={styles.cardImage}
+              contentFit="cover"
+              transition={200}
+              placeholder={PLACEHOLDER_BLURHASH}
+              cachePolicy="memory-disk"
+            />
+          ) : (
+            <View style={styles.cardImagePlaceholder}>
+              <Text style={styles.placeholderText}>No photo</Text>
+            </View>
+          )}
+
+          {aiScore != null ? (
+            <View style={styles.listingAiBadgeSlot}>
+              <AIBadge
+                score={Number(aiScore)}
+                aiData={item.ai_analysis}
+                onPressIntercept={handleBadgeIntercept}
+              />
+            </View>
+          ) : null}
+
+          <View style={styles.cardContent}>
+            <View style={styles.cardTopRow}>
+              <Text style={styles.categoryLabel}>
+                {item.produce_categories?.name}
+              </Text>
+              {item.farmer_profiles?.is_verified ? (
+                <Text style={styles.verifiedBadge}>✓ Verified</Text>
+              ) : null}
+            </View>
+
+            <Text style={styles.cardTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+
+            <View style={styles.cardPriceRow}>
+              <Text style={styles.cardPrice}>
+                {formatZAR(item.price)}/{item.unit}
+              </Text>
+              <Text style={styles.cardQuantity}>
+                {item.quantity} {item.unit}s
+              </Text>
+            </View>
+
+            <View style={styles.cardBottomRow}>
+              <Text style={styles.farmName}>
+                {item.farmer_profiles?.farm_name}
+              </Text>
+              <Text style={styles.timeText}>{timeAgo(item.created_at)}</Text>
+            </View>
+          </View>
+        </TactilePressable>
+      </AnalyzingGlow>
+    </CardWrapper>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//   RecommendationCard — compact horizontal-scroll card
+//
+//   Entrance: "crash cascade" — cards fly in from the right with bouncy
+//   spring physics, overshoot their target, squash-on-impact, then settle.
+//   Each card has an index-based delay for the staggered cascade effect.
+//
+//   Motion stretch (scaleX elongation during slide) mimics motion blur,
+//   making the arrival feel like it has real velocity behind it.
+// ═══════════════════════════════════════════════════════════════════════
+
+// Spring: bouncy enough to overshoot and oscillate before settling
+const CRASH_SPRING = {
+  damping: 9,
+  stiffness: 210,
+  mass: 0.75,
+  overshootClamping: false,
+};
+
+// Per-card delay within the cascade
+const CARD_STAGGER_MS = 85;
+const CARD_CASCADE_BASE_DELAY = 100;
+
+function RecommendationCard({ item, index, shouldEnter, onPress }) {
+  const [glowActive, setGlowActive] = useState(false);
+  const timeoutRef = useRef(null);
+
+  // Entrance animation values
+  // entry goes 0 → 1, driving slide + squash + opacity
+  const entry = useSharedValue(shouldEnter ? 0 : 1); // if section already expanded on mount, skip entrance
+  const impact = useSharedValue(0); // 0→1→0 briefly at arrival moment, for the "squash"
+
+  const primaryImage = item.listing_images?.find((img) => img.is_primary);
+  const imageUrl =
+    primaryImage?.image_url || item.listing_images?.[0]?.image_url;
+  const aiScore = item.ai_analysis?.condition_score;
+  const icon = CATEGORY_ICONS[item.produce_categories?.name] || "🌿";
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
+
+  // Trigger entrance when shouldEnter becomes true
+  useEffect(() => {
+    if (!shouldEnter) return;
+    const delay = CARD_CASCADE_BASE_DELAY + index * CARD_STAGGER_MS;
+
+    // Main slide + scale spring (overshoots by nature of low damping)
+    entry.value = 0;
+    entry.value = withDelay(delay, withSpring(1, CRASH_SPRING));
+
+    // Impact squash — fires ~just after the card arrives at ~80% of spring
+    // Rough timing: spring takes ~450ms to reach 80%, so impact at delay+320
+    impact.value = 0;
+    impact.value = withDelay(
+      delay + 280,
+      withSequence(
+        withTiming(1, {
+          duration: 80,
+          easing: Easing.bezier(0.34, 1.35, 0.64, 1),
+        }),
+        withTiming(0, {
+          duration: 240,
+          easing: Easing.bezier(0.22, 1, 0.36, 1),
+        }),
+      ),
+    );
+  }, [shouldEnter]);
+
+  const handleBadgeIntercept = ({ openModal }) => {
+    setGlowActive(true);
+    timeoutRef.current = setTimeout(() => {
+      openModal();
+    }, 420);
+    timeoutRef.current = setTimeout(() => {
+      setGlowActive(false);
+    }, 1140);
+  };
+
+  // Animated entrance style: slide from right, opacity, motion-stretch scaleX,
+  // impact-squash scaleX compression at arrival moment.
+  const entranceStyle = useAnimatedStyle(() => {
+    const e = entry.value;
+    const imp = impact.value;
+
+    // Slide: 180px right offset at e=0 → 0px at e=1. Since spring is
+    // bouncy, e will briefly overshoot 1.0 (into territory like 1.08)
+    // which makes translateX go slightly negative — the "past-target"
+    // overshoot that reads as a crash.
+    const translateX = interpolate(e, [0, 1], [180, 0], Extrapolation.EXTEND);
+
+    // Motion stretch: scaleX stretches during the slide. Peaks at
+    // e=0.5 (middle of entrance), resolves to 1.0 at rest.
+    const motionStretch = interpolate(
+      e,
+      [0, 0.5, 1],
+      [1, 1.18, 1],
+      Extrapolation.CLAMP,
+    );
+
+    // Impact squash: briefly compress scaleX at arrival (impact 0→1 = compress,
+    // impact 1→0 = unsquash back)
+    const squashX = 1 - 0.09 * imp;
+    const squashY = 1 + 0.06 * imp; // slight vertical puff on impact
+
+    // Opacity ramps in during first half of entrance
+    const opacity = interpolate(e, [0, 0.4], [0, 1], Extrapolation.CLAMP);
+
+    return {
+      opacity,
+      transform: [
+        { translateX },
+        { scaleX: motionStretch * squashX },
+        { scaleY: squashY },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View style={entranceStyle}>
+      <AnalyzingGlow active={glowActive} bleed={22}>
+        <TactilePressable
+          style={styles.recCard}
+          variant="compact"
+          onPress={onPress}
+        >
+          {imageUrl ? (
+            <Image
+              source={imageUrl}
+              style={styles.recImage}
+              contentFit="cover"
+              transition={200}
+              placeholder={PLACEHOLDER_BLURHASH}
+              cachePolicy="memory-disk"
+            />
+          ) : (
+            <View style={styles.recImagePlaceholder}>
+              <Text style={styles.recPlaceholderEmoji}>{icon}</Text>
+            </View>
+          )}
+
+          {aiScore != null ? (
+            <View style={styles.aiBadgeSlot}>
+              <AIBadge
+                score={Number(aiScore)}
+                aiData={item.ai_analysis}
+                compact
+                onPressIntercept={handleBadgeIntercept}
+              />
+            </View>
+          ) : null}
+
+          <View style={styles.recContent}>
+            <Text style={styles.recCategory}>
+              {item.produce_categories?.name}
+            </Text>
+            <Text style={styles.recTitle} numberOfLines={1}>
+              {item.title}
+            </Text>
+            <Text style={styles.recPrice}>
+              {formatZAR(item.price)}/{item.unit}
+            </Text>
+            <Text style={styles.recFarm} numberOfLines={1}>
+              {item.farmer_profiles?.farm_name}
+            </Text>
+          </View>
+        </TactilePressable>
+      </AnalyzingGlow>
+    </Animated.View>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//   RecommendationSectionUnfold — the carousel "unfolds" into view
+//
+//   Instead of just fading in, the whole rec section expands from a
+//   collapsed state: scaleY animates from 0.2 → 1 with origin at top,
+//   opacity fades 0→1. Gives a "container growing open" feel so the
+//   horizontal scroll doesn't just snap into place.
+//
+//   Once the container is ~80% expanded, it emits `cascadeReady=true`
+//   to its child so cards can begin their crash-cascade entrance.
+// ═══════════════════════════════════════════════════════════════════════
+function RecommendationSectionUnfold({ children, delay = 0 }) {
+  const [cascadeReady, setCascadeReady] = useState(false);
+  const unfold = useSharedValue(0);
+
+  useEffect(() => {
+    unfold.value = withDelay(
+      delay,
+      withTiming(1, {
+        duration: 460,
+        easing: Easing.bezier(0.22, 1, 0.36, 1),
+      }),
+    );
+
+    // Tell children to start cascading when container is mostly open
+    const t = setTimeout(() => setCascadeReady(true), delay + 220);
+    return () => clearTimeout(t);
+  }, []);
+
+  const unfoldStyle = useAnimatedStyle(() => {
+    const v = unfold.value;
+    // scaleY from top: simulates "unfolding" from collapsed to full height
+    const scaleY = interpolate(v, [0, 1], [0.25, 1]);
+    // Opacity fades in slightly earlier than the expansion completes
+    const opacity = interpolate(v, [0, 0.4, 1], [0, 1, 1], Extrapolation.CLAMP);
+    return {
+      opacity,
+      transform: [{ scaleY }],
+    };
+  });
+
+  return (
+    <Animated.View style={[{ transformOrigin: "top" }, unfoldStyle]}>
+      {typeof children === "function" ? children(cascadeReady) : children}
+    </Animated.View>
+  );
 }
 
 export default function BuyerFeedScreen({ navigation }) {
@@ -186,204 +526,114 @@ export default function BuyerFeedScreen({ navigation }) {
     </EntranceWrapper>
   );
 
-  // ── Recommendation card ──
-  const renderRecommendationCard = (item) => {
-    const primaryImage = item.listing_images?.find((img) => img.is_primary);
-    const imageUrl =
-      primaryImage?.image_url || item.listing_images?.[0]?.image_url;
-    const aiScore = item.ai_analysis?.condition_score;
-    const icon = CATEGORY_ICONS[item.produce_categories?.name] || "🌿";
-
-    return (
-      <TactilePressable
-        key={item.id}
-        style={styles.recCard}
-        variant="compact"
-        onPress={() =>
-          navigation.navigate("ListingDetail", { listingId: item.id })
-        }
-      >
-        {imageUrl ? (
-          <Image
-            source={imageUrl}
-            style={styles.recImage}
-            contentFit="cover"
-            transition={200}
-            placeholder={PLACEHOLDER_BLURHASH}
-            cachePolicy="memory-disk"
-          />
-        ) : (
-          <View style={styles.recImagePlaceholder}>
-            <Text style={styles.recPlaceholderEmoji}>{icon}</Text>
-          </View>
-        )}
-
-        {aiScore ? (
-          <View style={styles.recAiBadge}>
-            <Text style={styles.recAiBadgeText}>{aiScore}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.recContent}>
-          <Text style={styles.recCategory}>
-            {item.produce_categories?.name}
-          </Text>
-          <Text style={styles.recTitle} numberOfLines={1}>
-            {item.title}
-          </Text>
-          <Text style={styles.recPrice}>
-            {formatZAR(item.price)}/{item.unit}
-          </Text>
-          <Text style={styles.recFarm} numberOfLines={1}>
-            {item.farmer_profiles?.farm_name}
-          </Text>
-        </View>
-      </TactilePressable>
-    );
-  };
+  // ── Recommendation card (delegated to RecommendationCard component) ──
+  const renderRecommendationCard = (item, index, cascadeReady) => (
+    <RecommendationCard
+      key={item.id}
+      item={item}
+      index={index}
+      shouldEnter={cascadeReady}
+      onPress={() =>
+        navigation.navigate("ListingDetail", { listingId: item.id })
+      }
+    />
+  );
 
   const renderRecommendationSection = () => {
     if (selectedCategory || recommendations.length === 0) return null;
 
-    return (
-      <EntranceWrapper delay={160}>
-        <View style={styles.recSection}>
-          <View style={styles.recHeader}>
-            <View style={styles.recTitleRow}>
-              {isPersonalised ? (
-                <>
-                  <PulsingSparkle style={styles.recSparkle} />
-                  <Text style={styles.recSectionTitle}>Picked for You</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.recFireEmoji}>🔥</Text>
-                  <Text style={styles.recSectionTitle}>Popular Right Now</Text>
-                </>
-              )}
-            </View>
-            {isPersonalised && profileSummary?.topCategories?.length > 0 ? (
-              <Text style={styles.recSectionHint}>
-                Based on your interest in{" "}
-                {profileSummary.topCategories
-                  .slice(0, 2)
-                  .map((c) => c.categoryName)
-                  .join(" & ")}
-              </Text>
-            ) : !isPersonalised && profileSummary?.warmUpRemaining > 0 ? (
-              <Text style={styles.recSectionHint}>
-                Browse {profileSummary.warmUpRemaining} more listing
-                {profileSummary.warmUpRemaining !== 1 ? "s" : ""} to unlock
-                personalised picks
-              </Text>
-            ) : null}
+    // Use crash-cascade unfold only on first mount — subsequent renders
+    // (filter changes etc.) don't need the full entrance spectacle.
+    const isFirstReveal = isFirstMount.current && hasLoadedOnce;
+
+    const inner = (cascadeReady) => (
+      <View style={styles.recSection}>
+        <View style={styles.recHeader}>
+          <View style={styles.recTitleRow}>
+            {isPersonalised ? (
+              <>
+                <PulsingSparkle style={styles.recSparkle} />
+                <Text style={styles.recSectionTitle}>Picked for You</Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.recFireEmoji}>🔥</Text>
+                <Text style={styles.recSectionTitle}>Popular Right Now</Text>
+              </>
+            )}
           </View>
-
-          <FadeEdgeScroll
-            snapInterval={172}
-            fadeWidth={24}
-            contentPaddingLeft={spacing.md - 4}
-            contentPaddingRight={spacing.md}
-            backgroundColor={colors.backgroundSecondary}
-          >
-            {(scrollX, viewportWidth) =>
-              recommendations.map((item, i) => (
-                <ScrollAwareCard
-                  key={item.id}
-                  index={i}
-                  scrollX={scrollX}
-                  viewportWidth={viewportWidth}
-                  cardWidth={160}
-                  snapInterval={172}
-                  contentOffset={spacing.md - 4}
-                >
-                  {renderRecommendationCard(item)}
-                </ScrollAwareCard>
-              ))
-            }
-          </FadeEdgeScroll>
-        </View>
-      </EntranceWrapper>
-    );
-  };
-
-  // ── Listing card ──
-  const renderListing = ({ item, index }) => {
-    const primaryImage = item.listing_images?.find((img) => img.is_primary);
-    const imageUrl =
-      primaryImage?.image_url || item.listing_images?.[0]?.image_url;
-    const aiScore = item.ai_analysis?.condition_score;
-
-    const shouldAnimate = isFirstMount.current && index < 3;
-    const cardDelay = 260 + index * 80;
-
-    const CardWrapper = shouldAnimate ? FadeSlideIn : View;
-    const wrapperProps = shouldAnimate ? { delay: cardDelay } : {};
-
-    return (
-      <CardWrapper {...wrapperProps}>
-        <TactilePressable
-          style={styles.card}
-          variant="card"
-          onPress={() =>
-            navigation.navigate("ListingDetail", { listingId: item.id })
-          }
-        >
-          {imageUrl ? (
-            <Image
-              source={imageUrl}
-              style={styles.cardImage}
-              contentFit="cover"
-              transition={200}
-              placeholder={PLACEHOLDER_BLURHASH}
-              cachePolicy="memory-disk"
-            />
-          ) : (
-            <View style={styles.cardImagePlaceholder}>
-              <Text style={styles.placeholderText}>No photo</Text>
-            </View>
-          )}
-
-          {aiScore ? (
-            <View style={styles.aiBadge}>
-              <Text style={styles.aiBadgeText}>AI {aiScore}/10</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.cardContent}>
-            <View style={styles.cardTopRow}>
-              <Text style={styles.categoryLabel}>
-                {item.produce_categories?.name}
-              </Text>
-              {item.farmer_profiles?.is_verified ? (
-                <Text style={styles.verifiedBadge}>✓ Verified</Text>
-              ) : null}
-            </View>
-
-            <Text style={styles.cardTitle} numberOfLines={1}>
-              {item.title}
+          {isPersonalised && profileSummary?.topCategories?.length > 0 ? (
+            <Text style={styles.recSectionHint}>
+              Based on your interest in{" "}
+              {profileSummary.topCategories
+                .slice(0, 2)
+                .map((c) => c.categoryName)
+                .join(" & ")}
             </Text>
+          ) : !isPersonalised && profileSummary?.warmUpRemaining > 0 ? (
+            <Text style={styles.recSectionHint}>
+              Browse {profileSummary.warmUpRemaining} more listing
+              {profileSummary.warmUpRemaining !== 1 ? "s" : ""} to unlock
+              personalised picks
+            </Text>
+          ) : null}
+        </View>
 
-            <View style={styles.cardPriceRow}>
-              <Text style={styles.cardPrice}>
-                {formatZAR(item.price)}/{item.unit}
-              </Text>
-              <Text style={styles.cardQuantity}>
-                {item.quantity} {item.unit}s
-              </Text>
-            </View>
-
-            <View style={styles.cardBottomRow}>
-              <Text style={styles.farmName}>
-                {item.farmer_profiles?.farm_name}
-              </Text>
-              <Text style={styles.timeText}>{timeAgo(item.created_at)}</Text>
-            </View>
-          </View>
-        </TactilePressable>
-      </CardWrapper>
+        <FadeEdgeScroll
+          snapInterval={172}
+          fadeWidth={24}
+          contentPaddingLeft={spacing.md - 4}
+          contentPaddingRight={spacing.md}
+          backgroundColor={colors.backgroundSecondary}
+        >
+          {(scrollX, viewportWidth) =>
+            recommendations.map((item, i) => (
+              <ScrollAwareCard
+                key={item.id}
+                index={i}
+                scrollX={scrollX}
+                viewportWidth={viewportWidth}
+                cardWidth={160}
+                snapInterval={172}
+                contentOffset={spacing.md - 4}
+              >
+                {/* On first reveal: cards wait for cascadeReady from the
+                    unfold wrapper, then each plays its crash entrance
+                    indexed by position. On subsequent visits: cascadeReady
+                    is passed as true immediately so cards just render. */}
+                {renderRecommendationCard(
+                  item,
+                  i,
+                  isFirstReveal ? cascadeReady : true,
+                )}
+              </ScrollAwareCard>
+            ))
+          }
+        </FadeEdgeScroll>
+      </View>
     );
+
+    if (isFirstReveal) {
+      return (
+        <RecommendationSectionUnfold delay={160}>
+          {inner}
+        </RecommendationSectionUnfold>
+      );
+    }
+    return inner(true);
   };
+
+  // ── Listing card (delegated to ListingCard component) ──
+  const renderListing = ({ item, index }) => (
+    <ListingCard
+      item={item}
+      index={index}
+      isFirstMount={isFirstMount}
+      onPress={() =>
+        navigation.navigate("ListingDetail", { listingId: item.id })
+      }
+    />
+  );
 
   // ── "Latest Listings" divider ──
   const renderFeedHeader = () => (
@@ -438,8 +688,6 @@ export default function BuyerFeedScreen({ navigation }) {
   }
 
   return (
-    // edges={["top"]} only — the tab navigator handles bottom inset itself.
-    // Without this restriction we get double safe-area padding = visible gap.
     <SafeAreaView style={styles.safe} edges={["top"]}>
       {renderHeader()}
 
@@ -510,8 +758,6 @@ export default function BuyerFeedScreen({ navigation }) {
 }
 
 const styles = StyleSheet.create({
-  // Background matches the feed list background — no visible colour band
-  // between the scroll area and the tab bar.
   safe: { flex: 1, backgroundColor: colors.backgroundSecondary },
 
   // ── Header ──
@@ -602,9 +848,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     marginBottom: spacing.sm,
   },
-  // Align section text to the same left edge as listing cards (spacing.md
-  // in the list padding). Previously had md horizontal padding which looked
-  // unanchored next to the lg-padded header.
   recHeader: {
     paddingHorizontal: spacing.md,
     marginBottom: spacing.sm,
@@ -612,7 +855,7 @@ const styles = StyleSheet.create({
   recTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs + 2, // small deliberate gap between emoji + text
+    gap: spacing.xs + 2,
   },
   recSparkle: {
     fontSize: fonts.h3,
@@ -633,9 +876,6 @@ const styles = StyleSheet.create({
     marginLeft: 2,
   },
   recScroll: {
-    // Nudged 4px left of spacing.md so the rec card's visual edge (border +
-    // shadow optical spacing) lines up precisely with the listing card
-    // below it. Header above stays at spacing.md — it's text, no border.
     paddingLeft: spacing.md - 4,
     paddingRight: spacing.md,
     paddingVertical: spacing.xs,
@@ -644,7 +884,7 @@ const styles = StyleSheet.create({
     width: 160,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    marginRight: 12, // snap math: 160 + 12 = 172
+    marginRight: 12,
     borderWidth: 1,
     borderColor: colors.borderLight,
     overflow: "hidden",
@@ -663,18 +903,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   recPlaceholderEmoji: { fontSize: 32 },
-  recAiBadge: {
+
+  // ── AI badge slots — positioned containers for the new AIBadge ──
+  //
+  // AIBadge is an inline pill component that measures itself for the
+  // morph source rect, so we give it an absolute-positioned wrapper
+  // rather than styling the badge itself. This keeps AIBadge reusable.
+  aiBadgeSlot: {
     position: "absolute",
     top: 6,
     right: 6,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.aiBadge,
-    justifyContent: "center",
-    alignItems: "center",
+    zIndex: 2,
   },
-  recAiBadgeText: { color: "#fff", fontSize: 10, fontWeight: "800" },
+  listingAiBadgeSlot: {
+    position: "absolute",
+    top: spacing.sm,
+    right: spacing.sm,
+    zIndex: 2,
+  },
+
   recContent: { padding: spacing.sm },
   recCategory: {
     fontSize: 10,
@@ -726,9 +973,6 @@ const styles = StyleSheet.create({
   },
 
   // ── Main list ──
-  // No explicit paddingBottom — React Navigation's tab bar automatically
-  // inserts its height as contentInset. Adding our own padding on top
-  // of that creates a visible gap.
   list: {
     paddingHorizontal: spacing.md,
   },
@@ -753,16 +997,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   placeholderText: { color: colors.textTertiary, fontSize: fonts.caption },
-  aiBadge: {
-    position: "absolute",
-    top: spacing.sm,
-    right: spacing.sm,
-    backgroundColor: colors.aiBadge,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  aiBadgeText: { color: "#fff", fontSize: fonts.small, fontWeight: "700" },
   cardContent: { padding: spacing.md },
   cardTopRow: {
     flexDirection: "row",

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -6,327 +6,888 @@ import {
   StyleSheet,
   Alert,
   ScrollView,
+  RefreshControl,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect } from "@react-navigation/native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withDelay,
+  withSpring,
+  interpolate,
+  Extrapolate,
+  Easing,
+} from "react-native-reanimated";
+import * as Haptics from "expo-haptics";
+import {
+  ChevronRight,
+  Settings,
+  Edit2,
+  Star,
+  Package,
+  Heart,
+  MapPin,
+  Calendar,
+  TrendingUp,
+} from "lucide-react-native";
+
 import { useAuth } from "../../hooks/useAuth";
 import { logoutUser } from "../../services/authService";
-import { colors, spacing, fonts, radius } from "../../config/theme";
-import AIBadge from "../../components/ai/AIBadge";
+import { supabase } from "../../config/supabase";
+import {
+  colors,
+  spacing,
+  fonts,
+  radius,
+  shadows,
+  springs,
+  durations,
+  stagger,
+} from "../../config/theme";
 
-/**
- * Profile screen — shows user info and logout.
- *
- * TEMPORARY: "AI Badge Lab" section at the bottom tests the AIBadge
- * component. The first three badges in the top row have mock aiData
- * attached — tapping them opens the cinematic morph modal. The rest
- * only capture tap coordinates into the "Last tap" readout. This lets
- * us verify both modal mode and callback-fallback mode.
- *
- * Will be removed once the badge is integrated into real screens.
- */
+import { Modal, FlatList, ActivityIndicator } from "react-native";
+import { timeAgo } from "../../utils/dateUtils";
 
-// Mock AI data for the lab — this mimics the shape of an ai_analyses row.
-const MOCK_AI_DATA_BY_SCORE = {
-  7.2: {
-    condition_score: 7.2,
-    ripeness_estimate: "Approaching peak",
-    growth_insight:
-      "Good colour development, minor cosmetic blemishes visible. Flavour will be strong in 2-3 days.",
-    price_suggestion_min: 18,
-    price_suggestion_max: 24,
-    raw_feedback: {
-      variety_identified: "Pink Lady apples",
-      harvest_readiness: "soon",
-      shelf_life_days: 8,
-      storage_advice:
-        "Keep refrigerated at 2-4°C, away from ethylene producers like bananas.",
-      seasonal_note:
-        "End of season — expect quality decline in the coming weeks.",
-      market_insight: "High demand in premium grocery segment.",
-      confidence_level: "high",
-    },
-  },
-  8.5: {
-    condition_score: 8.5,
-    ripeness_estimate: "Peak",
-    growth_insight:
-      "Vibrant colour, firm skin, no visible defects. Good size uniformity.",
-    price_suggestion_min: 22,
-    price_suggestion_max: 28,
-    raw_feedback: {
-      variety_identified: "Gala apples",
-      harvest_readiness: "ready",
-      shelf_life_days: 6,
-      storage_advice: "Store at 2-4°C to extend shelf life by up to 3 days.",
-      seasonal_note: "Mid-season harvest — excellent flavour profile.",
-      market_insight: "Strong retail demand this week.",
-      confidence_level: "high",
-    },
-  },
-  9.8: {
-    condition_score: 9.8,
-    ripeness_estimate: "Peak",
-    growth_insight:
-      "Exceptional specimen — excellent colour, perfect size, zero defects.",
-    price_suggestion_min: 28,
-    price_suggestion_max: 36,
-    raw_feedback: {
-      variety_identified: "Honeycrisp apples",
-      harvest_readiness: "ready",
-      shelf_life_days: 10,
-      storage_advice:
-        "Store cool and dry. Premium produce — rotate frequently for display.",
-      seasonal_note: "Prime harvest window.",
-      market_insight: "Premium price point justified by quality.",
-      confidence_level: "high",
-    },
-  },
+// -----------------------------------------------------------------------------
+// Animations – inspired by ListingDetailScreen
+// -----------------------------------------------------------------------------
+const EASE_SETTLE = Easing.bezier(0.22, 1, 0.36, 1);
+const ANIMATION_DELAY_BASE = 120;
+const STAGGER_INTERVAL = stagger.standard; // 70ms
+
+const useFadeSlide = (delay, slideFrom = "bottom") => {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withDelay(
+      delay,
+      withTiming(1, { duration: durations.standard, easing: EASE_SETTLE }),
+    );
+  }, []);
+  const style = useAnimatedStyle(() => {
+    const opacity = progress.value;
+    const translateY =
+      slideFrom === "bottom"
+        ? interpolate(progress.value, [0, 1], [20, 0], Extrapolate.CLAMP)
+        : 0;
+    const translateX =
+      slideFrom === "left"
+        ? interpolate(progress.value, [0, 1], [-20, 0], Extrapolate.CLAMP)
+        : 0;
+    return { opacity, transform: [{ translateY }, { translateX }] };
+  });
+  return style;
 };
 
-export default function ProfileScreen() {
-  const { user, userRole } = useAuth();
-  const [lastTap, setLastTap] = useState(null);
-  const [remountKey, setRemountKey] = useState(0);
+const useStaggerSpring = (index) => {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withDelay(
+      ANIMATION_DELAY_BASE + index * STAGGER_INTERVAL,
+      withSpring(1, springs.gentle),
+    );
+  }, []);
+  const style = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: interpolate(progress.value, [0, 1], [0.96, 1]) }],
+  }));
+  return style;
+};
 
+// -----------------------------------------------------------------------------
+// Main Component
+// -----------------------------------------------------------------------------
+export default function ProfileScreen() {
+  const { user, userRole, profileId } = useAuth();
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  const scrollViewRef = React.useRef(null);
+
+  const [profileData, setProfileData] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [avatarInitial, setAvatarInitial] = useState("?");
+
+  const [showReviewsModal, setShowReviewsModal] = useState(false);
+  const [reviewsList, setReviewsList] = useState([]);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+
+  // Animated values for leaving transition (pop)
+  const leaveProgress = useSharedValue(0);
+
+  // Entrance animation per section (using staggered spring)
+  const avatarStyle = useStaggerSpring(0);
+  const nameStyle = useStaggerSpring(1);
+  const roleBadgeStyle = useStaggerSpring(2);
+  const statsRowStyle = useStaggerSpring(3);
+  const infoCardStyle = useStaggerSpring(4);
+  const actionButtonsStyle = useStaggerSpring(5);
+  const logoutButtonStyle = useStaggerSpring(6);
+
+  // Header backdrop fade
+  const headerStyle = useFadeSlide(0, "top");
+
+  // ---------------------------------------------------------------------------
+  // Data fetching
+  // ---------------------------------------------------------------------------
+  const fetchProfile = async () => {
+    if (!user || !userRole) return;
+
+    try {
+      // 1. Fetch base profile (farmer or buyer)
+      let profile = null;
+      if (userRole === "farmer") {
+        const { data, error } = await supabase
+          .from("farmer_profiles")
+          .select("*")
+          .eq("user_id", profileId)
+          .single();
+        if (!error) profile = data;
+      } else {
+        const { data, error } = await supabase
+          .from("buyer_profiles")
+          .select("*")
+          .eq("user_id", profileId)
+          .single();
+        if (!error) profile = data;
+      }
+      setProfileData(profile);
+      setAvatarInitial(
+        profile?.farm_name?.[0] ||
+          profile?.full_name?.[0] ||
+          user.email?.[0] ||
+          "?",
+      );
+
+      // 2. Fetch statistics
+      if (userRole === "farmer") {
+        const { count: listingsCount } = await supabase
+          .from("listings")
+          .select("*", { count: "exact", head: true })
+          .eq("farmer_id", profileId);
+        const { data: reviews } = await supabase
+          .from("farmer_reviews")
+          .select("rating")
+          .eq("farmer_id", profileId);
+        const reviewsCount = reviews?.length || 0;
+        const avgRating =
+          reviewsCount > 0
+            ? reviews.reduce((sum, r) => sum + r.rating, 0) / reviewsCount
+            : 0;
+
+        setStats({
+          listingsCount: listingsCount || 0,
+          avgRating: Number(avgRating.toFixed(1)),
+          reviewsCount,
+          totalSold: undefined,
+        });
+      } else {
+        const { count: savedCount } = await supabase
+          .from("saved_listings")
+          .select("*", { count: "exact", head: true })
+          .eq("buyer_id", profileId);
+        const { count: reviewsGiven } = await supabase
+          .from("farmer_reviews")
+          .select("*", { count: "exact", head: true })
+          .eq("buyer_id", profileId);
+
+        setStats({
+          savedListingsCount: savedCount || 0,
+          reviewsGivenCount: reviewsGiven || 0,
+        });
+      }
+    } catch (err) {
+      console.warn("Profile fetch error:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProfile();
+  }, [user, userRole]);
+
+  useEffect(() => {
+    if (showReviewsModal) {
+      fetchFarmerReviews();
+    }
+  }, [showReviewsModal]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      // Small delay to ensure content is rendered
+      setTimeout(() => {
+        scrollViewRef.current?.scrollTo({ y: 0, animated: false });
+      }, 100);
+    }, []),
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await fetchProfile();
+    setRefreshing(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const fetchFarmerReviews = async () => {
+    if (!profileData?.id) return;
+    setLoadingReviews(true);
+    try {
+      const { data, error } = await supabase
+        .from("farmer_reviews")
+        .select(
+          `
+        id,
+        rating,
+        comment,
+        created_at,
+        buyer:buyer_profiles (
+          full_name,
+          user_id
+        )
+      `,
+        )
+        .eq("farmer_id", profileData.id)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setReviewsList(data || []);
+    } catch (err) {
+      console.warn("Failed to load reviews:", err);
+      Alert.alert("Error", "Could not load reviews.");
+    } finally {
+      setLoadingReviews(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // Handlers
+  // ---------------------------------------------------------------------------
   const handleLogout = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert("Log Out", "Are you sure you want to log out?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Log Out",
         style: "destructive",
         onPress: async () => {
+          leaveProgress.value = withTiming(1, { duration: durations.fast });
           const { error } = await logoutUser();
-          if (error) {
+          if (error)
             Alert.alert("Error", "Failed to log out. Please try again.");
-          }
         },
       },
     ]);
   };
 
-  const handleBadgePress = (rect, score) => {
-    setLastTap({
-      score,
-      x: Math.round(rect.x),
-      y: Math.round(rect.y),
-      w: Math.round(rect.width),
-      h: Math.round(rect.height),
-    });
+  const handleEditProfile = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert("Edit Profile", "Profile editing will be available soon.");
   };
 
-  const sampleScores = [3.2, 5.4, 6.5, 7.2, 7.8, 8.1, 8.5, 8.9, 9.4, 9.8];
+  const handleViewSavedListings = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert(
+      "Saved Listings",
+      "Navigate to your saved listings (coming in next sprint).",
+    );
+  };
+
+  const handleViewMyListings = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    navigation.navigate("Listings", { screen: "MyListings" });
+  };
+
+  const handleSettings = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    Alert.alert("Settings", "App preferences and notifications.");
+  };
+
+  // ---------------------------------------------------------------------------
+  // Render helpers
+  // ---------------------------------------------------------------------------
+  const renderStatBox = (icon, label, value) => (
+    <View style={styles.statBox}>
+      {icon}
+      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </View>
+  );
+
+  const renderInfoRow = (Icon, label, value) => {
+    if (!value) return null;
+    return (
+      <View style={styles.infoRow}>
+        <Icon size={18} color={colors.textSecondary} />
+        <Text style={styles.infoText}>{value}</Text>
+      </View>
+    );
+  };
+
+  // Exit animation for the whole screen
+  const animatedContainerStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(leaveProgress.value, [0, 1], [1, 0]),
+    transform: [{ scale: interpolate(leaveProgress.value, [0, 1], [1, 0.96]) }],
+  }));
+
+  if (isLoading && !refreshing) {
+    return (
+      <SafeAreaView style={styles.safe}>
+        <View style={styles.loader}>
+          <Text style={styles.loaderText}>Loading profile...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Profile</Text>
-
-        <View style={styles.card}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>
-              {user?.email?.[0]?.toUpperCase() || "?"}
-            </Text>
-          </View>
-          <Text style={styles.email}>{user?.email || "No email"}</Text>
-          <View style={styles.roleBadge}>
-            <Text style={styles.roleText}>
-              {userRole === "farmer" ? "🌱 Farmer" : "🛒 Buyer"}
-            </Text>
-          </View>
-        </View>
-
-        <TouchableOpacity
-          style={styles.logoutButton}
-          onPress={handleLogout}
-          activeOpacity={0.8}
+    <Animated.View style={[styles.container, animatedContainerStyle]}>
+      <SafeAreaView style={styles.safe} edges={["top"]}>
+        <ScrollView
+          ref={scrollViewRef}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingBottom: insets.bottom + spacing.lg },
+          ]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={colors.primary}
+            />
+          }
         >
-          <Text style={styles.logoutText}>Log Out</Text>
-        </TouchableOpacity>
+          {/* Header background accent */}
+          <Animated.View style={[styles.headerAccent, headerStyle]} />
 
-        {/* ─── AI BADGE LAB (temp) ────────────────────── */}
-        <View style={styles.lab}>
-          <Text style={styles.labTitle}>AI Badge Lab</Text>
-          <Text style={styles.labSubtitle}>
-            Badges with AI data (7.2, 8.5, 9.8) open the morph modal on tap.
-            Others just capture tap coordinates below.
+          {/* Avatar + Name */}
+          <Animated.View style={[styles.avatarWrapper, avatarStyle]}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>
+                {avatarInitial.toUpperCase()}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={styles.editIcon}
+              onPress={handleEditProfile}
+            >
+              <Edit2 size={16} color={colors.textSecondary} strokeWidth={2} />
+            </TouchableOpacity>
+          </Animated.View>
+
+          <Animated.View style={nameStyle}>
+            <Text style={styles.displayName}>
+              {userRole === "farmer"
+                ? profileData?.farm_name || "Farmer"
+                : profileData?.full_name || "Buyer"}
+            </Text>
+          </Animated.View>
+
+          <Animated.View style={roleBadgeStyle}>
+            <View style={styles.roleBadge}>
+              <Text style={styles.roleText}>
+                {userRole === "farmer" ? "🌱 Farmer" : "🛒 Buyer"}
+              </Text>
+            </View>
+          </Animated.View>
+
+          {/* Stats Row – dynamic based on role */}
+          <Animated.View style={[styles.statsRow, statsRowStyle]}>
+            {userRole === "farmer" && stats ? (
+              <>
+                {renderStatBox(
+                  <Package size={20} color={colors.primary} />,
+                  "Listings",
+                  stats.listingsCount,
+                )}
+                {renderStatBox(
+                  <Star size={20} color={colors.warning} />,
+                  "Rating",
+                  stats.avgRating.toFixed(1),
+                )}
+                <TouchableOpacity
+                  style={styles.statBoxTouchable}
+                  onPress={() => setShowReviewsModal(true)}
+                  activeOpacity={0.7}
+                >
+                  {renderStatBox(
+                    <Heart size={20} color={colors.danger} />,
+                    "Reviews",
+                    stats.reviewsCount,
+                  )}
+                </TouchableOpacity>
+              </>
+            ) : stats ? (
+              <>
+                {renderStatBox(
+                  <Heart size={20} color={colors.danger} />,
+                  "Saved",
+                  stats.savedListingsCount,
+                )}
+                {renderStatBox(
+                  <Star size={20} color={colors.warning} />,
+                  "Reviews",
+                  stats.reviewsGivenCount,
+                )}
+                {renderStatBox(
+                  <Package size={20} color={colors.primary} />,
+                  "Orders",
+                  "—",
+                )}
+              </>
+            ) : null}
+          </Animated.View>
+
+          {/* Info Card */}
+          <Animated.View style={[styles.infoCard, infoCardStyle]}>
+            {renderInfoRow(
+              MapPin,
+              "Location",
+              profileData?.location_name || "Not set",
+            )}
+            {renderInfoRow(
+              Calendar,
+              "Member since",
+              profileData?.created_at
+                ? new Date(profileData.created_at).toLocaleDateString(
+                    undefined,
+                    { year: "numeric", month: "long" },
+                  )
+                : null,
+            )}
+            {user?.email && (
+              <View style={styles.infoRow}>
+                <Text style={styles.infoText}>📧 {user.email}</Text>
+              </View>
+            )}
+            {renderInfoRow(
+              Text,
+              "# Phone",
+              profileData?.phone || "📞 Not provided",
+            )}
+            {userRole === "farmer" && profileData?.bio && (
+              <View style={styles.bioContainer}>
+                <Text style={styles.bioLabel}>Bio</Text>
+                <Text style={styles.bioText}>{profileData.bio}</Text>
+              </View>
+            )}
+          </Animated.View>
+
+          {/* Action Buttons */}
+          <Animated.View style={[styles.actionsGrid, actionButtonsStyle]}>
+            {userRole === "farmer" ? (
+              <>
+                <TouchableOpacity
+                  style={styles.actionCard}
+                  onPress={handleViewMyListings}
+                >
+                  <Package size={24} color={colors.primary} />
+                  <Text style={styles.actionTitle}>My Listings</Text>
+                  <ChevronRight
+                    size={18}
+                    color={colors.textTertiary}
+                    style={styles.actionChevron}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionCard}
+                  onPress={() => Alert.alert("Analytics", "Coming soon")}
+                >
+                  <TrendingUp size={24} color={colors.info} />
+                  <Text style={styles.actionTitle}>Analytics</Text>
+                  <ChevronRight
+                    size={18}
+                    color={colors.textTertiary}
+                    style={styles.actionChevron}
+                  />
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <TouchableOpacity
+                  style={styles.actionCard}
+                  onPress={handleViewSavedListings}
+                >
+                  <Heart size={24} color={colors.danger} />
+                  <Text style={styles.actionTitle}>Saved</Text>
+                  <ChevronRight
+                    size={18}
+                    color={colors.textTertiary}
+                    style={styles.actionChevron}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.actionCard}
+                  onPress={() => Alert.alert("Purchase History", "Coming soon")}
+                >
+                  <Package size={24} color={colors.primary} />
+                  <Text style={styles.actionTitle}>Orders</Text>
+                  <ChevronRight
+                    size={18}
+                    color={colors.textTertiary}
+                    style={styles.actionChevron}
+                  />
+                </TouchableOpacity>
+              </>
+            )}
+          </Animated.View>
+
+          {/* Logout Button */}
+          <Animated.View style={logoutButtonStyle}>
+            <TouchableOpacity
+              style={styles.logoutButton}
+              onPress={handleLogout}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.logoutText}>Log Out</Text>
+            </TouchableOpacity>
+          </Animated.View>
+
+          <Text style={styles.versionText}>
+            GreenBidder v2.0 — Farm to fork intelligence
           </Text>
-
-          <Text style={styles.labSection}>Full gradient range</Text>
-          <View key={`row-${remountKey}`} style={styles.badgeRow}>
-            {sampleScores.map((s) => {
-              const mockData = MOCK_AI_DATA_BY_SCORE[s] || null;
-              return (
-                <AIBadge
-                  key={`${s}-${remountKey}`}
-                  score={s}
-                  aiData={mockData}
-                  onPress={handleBadgePress}
-                  style={styles.badgeSpacing}
-                />
-              );
-            })}
+        </ScrollView>
+      </SafeAreaView>
+      <Modal
+        visible={showReviewsModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={() => setShowReviewsModal(false)}
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>
+              Reviews for {profileData?.farm_name || "Farmer"}
+            </Text>
+            <TouchableOpacity
+              onPress={() => setShowReviewsModal(false)}
+              style={styles.modalClose}
+            >
+              <Text style={styles.modalCloseText}>Done</Text>
+            </TouchableOpacity>
           </View>
 
-          <Text style={styles.labSection}>Compact variant</Text>
-          <View key={`row-compact-${remountKey}`} style={styles.badgeRow}>
-            {sampleScores.map((s) => (
-              <AIBadge
-                key={`c-${s}-${remountKey}`}
-                score={s}
-                compact
-                onPress={handleBadgePress}
-                style={styles.badgeSpacing}
-              />
-            ))}
-          </View>
-
-          <TouchableOpacity
-            style={styles.replayButton}
-            onPress={() => setRemountKey((k) => k + 1)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.replayText}>Replay breath animation</Text>
-          </TouchableOpacity>
-
-          {lastTap ? (
-            <View style={styles.tapInfo}>
-              <Text style={styles.tapInfoLabel}>Last tap captured:</Text>
-              <Text style={styles.tapInfoText}>
-                score {lastTap.score.toFixed(1)} · x={lastTap.x} y={lastTap.y} ·{" "}
-                {lastTap.w}×{lastTap.h}
+          {loadingReviews ? (
+            <View style={styles.modalLoader}>
+              <ActivityIndicator size="large" color={colors.primary} />
+            </View>
+          ) : reviewsList.length === 0 ? (
+            <View style={styles.emptyReviews}>
+              <Text style={styles.emptyReviewsIcon}>⭐</Text>
+              <Text style={styles.emptyReviewsText}>No reviews yet</Text>
+              <Text style={styles.emptyReviewsSubtext}>
+                Be the first to leave a review
               </Text>
             </View>
           ) : (
-            <Text style={styles.tapHint}>
-              Tap 7.2, 8.5, or 9.8 for modal — others record coords →
-            </Text>
+            <FlatList
+              data={reviewsList}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.reviewsList}
+              renderItem={({ item }) => (
+                <View style={styles.reviewItem}>
+                  <View style={styles.reviewHeader}>
+                    <Text style={styles.reviewerName}>
+                      {item.buyer?.full_name || "Anonymous"}
+                    </Text>
+                    <View style={styles.reviewRating}>
+                      <Text style={styles.reviewRatingStars}>
+                        {"★".repeat(item.rating)}
+                        {"☆".repeat(5 - item.rating)}
+                      </Text>
+                    </View>
+                  </View>
+                  {item.comment ? (
+                    <Text style={styles.reviewComment}>{item.comment}</Text>
+                  ) : null}
+                  <Text style={styles.reviewDate}>
+                    {timeAgo(item.created_at)}
+                  </Text>
+                </View>
+              )}
+            />
           )}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+        </SafeAreaView>
+      </Modal>
+    </Animated.View>
   );
 }
 
+// -----------------------------------------------------------------------------
+// Styles (adhering to design tokens)
+// -----------------------------------------------------------------------------
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.backgroundSecondary },
-  container: { padding: spacing.lg, paddingBottom: spacing.xxl },
-  title: {
+  container: { flex: 1 },
+  scrollContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
+  loader: { flex: 1, justifyContent: "center", alignItems: "center" },
+  loaderText: { fontSize: fonts.caption, color: colors.textSecondary },
+
+  headerAccent: {
+    position: "absolute",
+    top: -100,
+    left: -50,
+    right: -50,
+    height: 200,
+    backgroundColor: colors.primaryLight,
+    opacity: 0.4,
+    borderRadius: 200,
+    transform: [{ scale: 1.5 }],
+  },
+
+  avatarWrapper: {
+    alignItems: "center",
+    marginBottom: spacing.md,
+    position: "relative",
+  },
+  avatar: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: colors.primary,
+    justifyContent: "center",
+    alignItems: "center",
+    ...shadows.raised,
+  },
+  avatarText: { fontSize: 40, fontWeight: "700", color: colors.white },
+  editIcon: {
+    position: "absolute",
+    bottom: 0,
+    right: "30%",
+    backgroundColor: colors.background,
+    borderRadius: radius.full,
+    padding: spacing.xs,
+    ...shadows.resting,
+  },
+
+  displayName: {
     fontSize: fonts.h1,
     fontWeight: "700",
     color: colors.textPrimary,
-    marginBottom: spacing.lg,
+    textAlign: "center",
+    marginBottom: spacing.xs,
   },
-  card: {
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: colors.borderLight,
-  },
-  avatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.primaryLight,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: spacing.md,
-  },
-  avatarText: {
-    fontSize: fonts.h1,
-    fontWeight: "700",
-    color: colors.primaryDark,
-  },
-  email: { fontSize: fonts.body, color: colors.textPrimary, fontWeight: "500" },
   roleBadge: {
-    marginTop: spacing.sm,
+    alignSelf: "center",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     backgroundColor: colors.primaryLight,
     borderRadius: radius.full,
+    marginBottom: spacing.lg,
   },
   roleText: {
     fontSize: fonts.caption,
     fontWeight: "600",
     color: colors.primaryDark,
   },
+
+  statsRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginBottom: spacing.xl,
+    gap: spacing.sm,
+  },
+  statBox: {
+    flex: 1,
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    alignItems: "center",
+    ...shadows.resting,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  statValue: {
+    fontSize: fonts.h2,
+    fontWeight: "700",
+    color: colors.textPrimary,
+    marginTop: spacing.xs,
+  },
+  statLabel: {
+    fontSize: fonts.small,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+
+  infoCard: {
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.xl,
+    ...shadows.raised,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  infoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: spacing.md,
+    gap: spacing.sm,
+  },
+  infoText: {
+    fontSize: fonts.body,
+    color: colors.textSecondary,
+    flexShrink: 1,
+  },
+  bioContainer: {
+    marginTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+    paddingTop: spacing.sm,
+  },
+  bioLabel: {
+    fontSize: fonts.small,
+    fontWeight: "600",
+    color: colors.textTertiary,
+    marginBottom: spacing.xs,
+  },
+  bioText: { fontSize: fonts.body, color: colors.textPrimary, lineHeight: 20 },
+
+  actionsGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  actionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.background,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    flex: 1,
+    minWidth: "45%",
+    ...shadows.resting,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  actionTitle: {
+    fontSize: fonts.body,
+    fontWeight: "500",
+    color: colors.textPrimary,
+    marginLeft: spacing.sm,
+    flex: 1,
+  },
+  actionChevron: { marginLeft: "auto" },
+
   logoutButton: {
-    marginTop: spacing.xl,
-    height: 48,
+    height: 52,
     borderWidth: 1.5,
     borderColor: colors.danger,
     borderRadius: radius.md,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: colors.dangerLight,
+    marginBottom: spacing.lg,
   },
   logoutText: { color: colors.danger, fontSize: fonts.body, fontWeight: "600" },
 
-  lab: {
-    marginTop: spacing.xl,
-    padding: spacing.lg,
-    backgroundColor: colors.background,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.borderLight,
+  versionText: {
+    fontSize: fonts.small,
+    color: colors.textTertiary,
+    textAlign: "center",
+    marginTop: spacing.lg,
+    fontStyle: "italic",
   },
-  labTitle: {
+  // Add to StyleSheet
+  statBoxTouchable: {
+    flex: 1,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  modalTitle: {
     fontSize: fonts.h3,
     fontWeight: "700",
     color: colors.textPrimary,
   },
-  labSubtitle: {
+  modalClose: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  modalCloseText: {
+    fontSize: fonts.body,
+    fontWeight: "600",
+    color: colors.primary,
+  },
+  modalLoader: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  emptyReviews: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: spacing.xl,
+  },
+  emptyReviewsIcon: {
+    fontSize: 48,
+    marginBottom: spacing.md,
+  },
+  emptyReviewsText: {
+    fontSize: fonts.body,
+    fontWeight: "600",
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+  emptyReviewsSubtext: {
+    fontSize: fonts.caption,
+    color: colors.textSecondary,
+  },
+  reviewsList: {
+    padding: spacing.md,
+  },
+  reviewItem: {
+    backgroundColor: colors.backgroundSecondary,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+  },
+  reviewHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: spacing.xs,
+  },
+  reviewerName: {
+    fontSize: fonts.caption,
+    fontWeight: "600",
+    color: colors.textPrimary,
+  },
+  reviewRatingStars: {
     fontSize: fonts.small,
+    color: colors.warning,
+  },
+  reviewComment: {
+    fontSize: fonts.body,
     color: colors.textSecondary,
     marginTop: spacing.xs,
-    marginBottom: spacing.md,
-    lineHeight: 18,
+    lineHeight: 20,
   },
-  labSection: {
+  reviewDate: {
     fontSize: fonts.small,
     color: colors.textTertiary,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
-  },
-  badgeRow: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
-  badgeSpacing: { marginRight: 0 },
-  replayButton: {
-    marginTop: spacing.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    backgroundColor: colors.backgroundTertiary,
-    borderRadius: radius.md,
-    alignSelf: "flex-start",
-  },
-  replayText: {
-    fontSize: fonts.small,
-    fontWeight: "500",
-    color: colors.textPrimary,
-  },
-  tapInfo: {
-    marginTop: spacing.md,
-    padding: spacing.sm,
-    backgroundColor: colors.backgroundSecondary,
-    borderRadius: radius.sm,
-  },
-  tapInfoLabel: {
-    fontSize: fonts.small,
-    color: colors.textTertiary,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  tapInfoText: {
-    fontSize: fonts.small,
-    fontFamily: "monospace",
-    color: colors.textPrimary,
-  },
-  tapHint: {
-    marginTop: spacing.md,
-    fontSize: fonts.small,
-    color: colors.textTertiary,
-    fontStyle: "italic",
+    marginTop: spacing.xs,
   },
 });

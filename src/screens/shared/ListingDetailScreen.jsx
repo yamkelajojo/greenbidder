@@ -1,16 +1,36 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   ScrollView,
   Image,
   ActivityIndicator,
   Alert,
   Linking,
+  Modal,
+  Pressable,
+  BackHandler,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
+import { useFocusEffect } from "@react-navigation/native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  withDelay,
+  withSequence,
+  Easing,
+  interpolate,
+  Extrapolation,
+} from "react-native-reanimated";
+import * as Haptics from "expo-haptics";
+import { Heart, MessageCircle } from "lucide-react-native";
+
 import { getListingById } from "../../services/listingService";
 import { useAuth } from "../../hooks/useAuth";
 import { supabase } from "../../config/supabase";
@@ -18,32 +38,203 @@ import { formatZAR } from "../../utils/formatters";
 import { timeAgo } from "../../utils/dateUtils";
 import { colors, spacing, fonts, radius } from "../../config/theme";
 import { trackView, trackContact } from "../../services/trackingService";
-import { Modal } from "react-native";
 import ReviewSheet from "../../components/shared/ReviewSheet";
 import FarmerTrustCard from "../../components/shared/FarmerTrustCard";
 import { hasReviewed } from "../../services/reviewService";
+import AIDetailCard from "../../components/ai/AIDetailCard";
+import LocationChip from "../../components/shared/LocationChip";
 
 /**
- * Listing detail screen — full view of a single listing.
- * Criterion 8 — CRUD Read detail view.
- * Criterion 3 — single query with joins fetches all related data.
+ * ═══════════════════════════════════════════════════════════════════════
+ *   ListingDetailScreen — v3 polish
+ *
+ *   v3 changes (April 2026):
+ *
+ *   • HEADER RHYTHM tightened. The previous content top padding + title
+ *     margin stack meant ~32px of breathing room between the image and
+ *     the first line of text. Reduced content.paddingTop from lg → md
+ *     and title.marginBottom from sm → xs. The intro block now reads as
+ *     a single connected unit with the image rather than floating
+ *     away from it.
+ *
+ *   • LocationChip added to the metadata row. Surfaces WHERE the produce
+ *     is from at first-class prominence (not just buried in the farmer
+ *     card below), and makes the AI's regional analysis feel honest —
+ *     the AI uses the same location data as its input.
+ *
+ *   • askingPrice + unit passed down to AIDetailCard so the AI's new
+ *     price_assessment renders as an instrument scale with the farmer's
+ *     actual price as a glowing tick.
+ *
+ *   ─── Preserved from v2 ───
+ *   • Back button respects top safe-area inset (no status-bar clash).
+ *   • Action bar uses symmetric padding (doesn't stack with tab-bar
+ *     home-indicator inset).
+ * ═══════════════════════════════════════════════════════════════════════
  */
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+const EASE_SETTLE = Easing.bezier(0.22, 1, 0.36, 1);
+const EASE_TACTILE = Easing.bezier(0.34, 1.35, 0.64, 1);
+const EASE_PLAYFUL = Easing.bezier(0.34, 1.7, 0.6, 1);
+const EASE_READING = Easing.bezier(0.25, 0.1, 0.3, 1);
+const EASE_IN_QUICK = Easing.bezier(0.5, 0, 0.9, 0.4);
+
+const LEAVE_OPACITY_END = 0.75;
+const LEAVE_SCALE_END = 0.65;
+
+// ─── Page element animation helper ───
+function useEntranceStyle(entryValue, leaveValue, config = {}) {
+  const {
+    translateX = [0, 0],
+    translateY = [0, 0],
+    scaleFrom = 1,
+    motionStretchX = 1,
+    motionStretchY = 1,
+    rotateFrom = 0,
+    leaveDir = "down",
+  } = config;
+
+  return useAnimatedStyle(() => {
+    const v = entryValue.value;
+    const l = leaveValue.value;
+    const leaveOp = interpolate(
+      l,
+      [0, LEAVE_OPACITY_END],
+      [1, 0],
+      Extrapolation.CLAMP,
+    );
+    const leaveScale = interpolate(
+      l,
+      [0, LEAVE_SCALE_END],
+      [1, 0.92],
+      Extrapolation.CLAMP,
+    );
+    const leaveTY =
+      leaveDir === "down" ? l * 12 : leaveDir === "up" ? l * -12 : 0;
+    const leaveTX =
+      leaveDir === "left" ? l * -12 : leaveDir === "right" ? l * 12 : 0;
+
+    const stretchX = interpolate(v, [0, 0.5, 1], [1, motionStretchX, 1]);
+    const stretchY = interpolate(v, [0, 0.5, 1], [1, motionStretchY, 1]);
+    const rotation = interpolate(v, [0, 1], [rotateFrom, 0]);
+
+    return {
+      opacity: v * leaveOp,
+      transform: [
+        { translateX: interpolate(v, [0, 1], translateX) + leaveTX },
+        { translateY: interpolate(v, [0, 1], translateY) + leaveTY },
+        { rotate: `${rotation}deg` },
+        { scale: interpolate(v, [0, 1], [scaleFrom, 1]) * leaveScale },
+        { scaleX: stretchX },
+        { scaleY: stretchY },
+      ],
+    };
+  });
+}
+
+// ─── SaveHeart (unchanged from v2) ───
+function SaveHeart({ isSaved, onPress }) {
+  const scale = useSharedValue(1);
+  const burst = useSharedValue(0);
+  const fillProgress = useSharedValue(isSaved ? 1 : 0);
+
+  useEffect(() => {
+    fillProgress.value = withTiming(isSaved ? 1 : 0, { duration: 220 });
+  }, [isSaved]);
+
+  const handlePress = () => {
+    if (!isSaved) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+    scale.value = withSequence(
+      withTiming(1.45, { duration: 140, easing: EASE_PLAYFUL }),
+      withSpring(1, { damping: 10, stiffness: 240, mass: 0.6 }),
+    );
+    if (!isSaved) {
+      burst.value = 0;
+      burst.value = withTiming(1, {
+        duration: 520,
+        easing: Easing.out(Easing.cubic),
+      });
+    }
+    onPress();
+  };
+
+  const heartStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+  const heartFillStyle = useAnimatedStyle(() => ({
+    opacity: fillProgress.value,
+  }));
+  const burstStyle = useAnimatedStyle(() => {
+    const b = burst.value;
+    return {
+      opacity: interpolate(b, [0, 0.2, 1], [0, 0.6, 0], Extrapolation.CLAMP),
+      transform: [{ scale: interpolate(b, [0, 1], [0.4, 2.2]) }],
+    };
+  });
+
+  return (
+    <AnimatedPressable
+      onPress={handlePress}
+      style={[styles.heartButton, heartStyle]}
+      hitSlop={10}
+    >
+      <Animated.View
+        style={[styles.heartBurst, burstStyle]}
+        pointerEvents="none"
+      />
+      <Heart size={22} color={colors.textSecondary} strokeWidth={2} />
+      <Animated.View
+        style={[StyleSheet.absoluteFill, styles.heartFillWrap, heartFillStyle]}
+      >
+        <Heart size={22} color="#E53E3E" fill="#E53E3E" strokeWidth={2} />
+      </Animated.View>
+    </AnimatedPressable>
+  );
+}
+
+// ─── Main screen ───
 export default function ListingDetailScreen({ route, navigation }) {
   const { listingId } = route.params;
   const { user, isBuyer, profileId } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const [listing, setListing] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaved, setIsSaved] = useState(false);
-
   const [showReview, setShowReview] = useState(false);
   const [alreadyReviewed, setAlreadyReviewed] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+
+  const leave = useSharedValue(0);
+
+  const imageR = useSharedValue(0);
+  const topRowR = useSharedValue(0);
+  const locationR = useSharedValue(0); // NEW — LocationChip gets its own entry
+  const titleR = useSharedValue(0);
+  const priceR = useSharedValue(0);
+  const priceQtyR = useSharedValue(0);
+  const descR = useSharedValue(0);
+  const aiWrapR = useSharedValue(0);
+  const farmerR = useSharedValue(0);
+  const trustR = useSharedValue(0);
+  const metaR = useSharedValue(0);
+  const actionBarR = useSharedValue(0);
+  const heartBtnR = useSharedValue(0);
+  const waBtnR = useSharedValue(0);
+  const msgBtnR = useSharedValue(0);
+
+  const jitterSeed = useRef(Math.floor((Math.random() - 0.5) * 60)).current;
+  const J = (base) => base + jitterSeed;
 
   useEffect(() => {
     loadListing();
     const viewStart = Date.now();
-
-    // When the buyer leaves this screen, record how long they viewed
     return () => {
       if (isBuyer && profileId) {
         const seconds = (Date.now() - viewStart) / 1000;
@@ -52,13 +243,109 @@ export default function ListingDetailScreen({ route, navigation }) {
     };
   }, [listingId]);
 
+  const hasAnimatedRef = useRef(false);
+  useEffect(() => {
+    if (!listing || hasAnimatedRef.current) return;
+    hasAnimatedRef.current = true;
+
+    imageR.value = withDelay(
+      J(40),
+      withTiming(1, { duration: 640, easing: EASE_SETTLE }),
+    );
+
+    topRowR.value = withDelay(
+      J(180),
+      withTiming(1, { duration: 420, easing: EASE_PLAYFUL }),
+    );
+
+    // Location chip arrives a beat after the category — small detail, small offset
+    locationR.value = withDelay(
+      J(240),
+      withTiming(1, { duration: 440, easing: EASE_SETTLE }),
+    );
+
+    titleR.value = withDelay(
+      J(300),
+      withTiming(1, { duration: 560, easing: EASE_TACTILE }),
+    );
+
+    priceR.value = withDelay(
+      J(420),
+      withTiming(1, { duration: 480, easing: EASE_TACTILE }),
+    );
+    priceQtyR.value = withDelay(
+      J(500),
+      withTiming(1, { duration: 420, easing: EASE_SETTLE }),
+    );
+
+    descR.value = withDelay(
+      J(580),
+      withTiming(1, { duration: 640, easing: EASE_READING }),
+    );
+
+    aiWrapR.value = withDelay(
+      J(720),
+      withSpring(1, { damping: 12, stiffness: 160, mass: 0.9 }),
+    );
+
+    farmerR.value = withDelay(
+      J(940),
+      withTiming(1, { duration: 500, easing: EASE_SETTLE }),
+    );
+
+    trustR.value = withDelay(
+      J(1060),
+      withTiming(1, { duration: 440, easing: EASE_SETTLE }),
+    );
+
+    metaR.value = withDelay(
+      J(1180),
+      withTiming(1, { duration: 400, easing: EASE_SETTLE }),
+    );
+
+    actionBarR.value = withDelay(
+      J(340),
+      withTiming(1, { duration: 480, easing: EASE_SETTLE }),
+    );
+    heartBtnR.value = withDelay(
+      J(380),
+      withSpring(1, { damping: 11, stiffness: 220, mass: 0.7 }),
+    );
+    waBtnR.value = withDelay(
+      J(460),
+      withSpring(1, { damping: 11, stiffness: 220, mass: 0.7 }),
+    );
+    msgBtnR.value = withDelay(
+      J(540),
+      withSpring(1, { damping: 11, stiffness: 220, mass: 0.7 }),
+    );
+  }, [listing]);
+
+  const handleBack = useCallback(() => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    leave.value = withTiming(1, { duration: 260, easing: EASE_IN_QUICK });
+    setTimeout(() => {
+      navigation.goBack();
+    }, 240);
+  }, [isLeaving, navigation]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        handleBack();
+        return true;
+      });
+      return () => sub.remove();
+    }, [handleBack]),
+  );
+
   const loadListing = async () => {
     setIsLoading(true);
-    const { data, error } = await getListingById(listingId);
+    const { data } = await getListingById(listingId);
     if (data) {
       setListing(data);
       if (isBuyer) checkIfSaved();
-
       if (isBuyer && profileId && data.farmer_profiles?.id) {
         hasReviewed(profileId, data.farmer_profiles.id).then(
           setAlreadyReviewed,
@@ -68,10 +355,6 @@ export default function ListingDetailScreen({ route, navigation }) {
     setIsLoading(false);
   };
 
-  /**
-   * Check if buyer has saved this listing.
-   * Criterion 3 — count query instead of fetching full rows.
-   */
   const checkIfSaved = async () => {
     try {
       const { data: userData } = await supabase
@@ -79,23 +362,18 @@ export default function ListingDetailScreen({ route, navigation }) {
         .select("id")
         .eq("auth_id", user.id)
         .single();
-
       if (!userData) return;
-
       const { data: buyerData } = await supabase
         .from("buyer_profiles")
         .select("id")
         .eq("user_id", userData.id)
         .single();
-
       if (!buyerData) return;
-
       const { count } = await supabase
         .from("saved_listings")
         .select("id", { count: "exact", head: true })
         .eq("buyer_id", buyerData.id)
         .eq("listing_id", listingId);
-
       setIsSaved(count > 0);
     } catch (err) {
       console.warn("Check saved failed:", err.message);
@@ -109,15 +387,12 @@ export default function ListingDetailScreen({ route, navigation }) {
         .select("id")
         .eq("auth_id", user.id)
         .single();
-
       const { data: buyerData } = await supabase
         .from("buyer_profiles")
         .select("id")
         .eq("user_id", userData.id)
         .single();
-
       if (!buyerData) return;
-
       if (isSaved) {
         await supabase
           .from("saved_listings")
@@ -136,56 +411,144 @@ export default function ListingDetailScreen({ route, navigation }) {
     }
   };
 
-  const handleContact = () => {
+  const handleWhatsApp = () => {
     const phone = listing?.farmer_profiles?.phone;
-    if (phone) {
+    if (!phone) {
       Alert.alert(
-        "Contact Farmer",
-        `Call ${listing.farmer_profiles.farm_name}?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Call",
-            onPress: () => {
-              if (isBuyer && profileId)
-                trackContact(profileId, listingId, "phone");
-              Linking.openURL(`tel:${phone}`);
-            },
-          },
-          {
-            text: "WhatsApp",
-            onPress: () => {
-              if (isBuyer && profileId)
-                trackContact(profileId, listingId, "whatsapp");
-              Linking.openURL(
-                `whatsapp://send?phone=${phone}&text=Hi, I'm interested in your ${listing.title} on GreenBidder`,
-              );
-            },
-          },
-        ],
+        "No WhatsApp",
+        "This farmer hasn't added a phone number yet.",
       );
-    } else {
-      Alert.alert("Contact", "This farmer hasn't added a phone number yet.");
+      return;
     }
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    if (isBuyer && profileId) trackContact(profileId, listingId, "whatsapp");
+    Linking.openURL(
+      `whatsapp://send?phone=${phone}&text=${encodeURIComponent(
+        `Hi, I'm interested in your ${listing.title} on GreenBidder`,
+      )}`,
+    ).catch(() => {
+      Alert.alert(
+        "WhatsApp not installed",
+        "Please install WhatsApp to message this farmer.",
+      );
+    });
   };
+
+  const handleMessage = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    Alert.alert(
+      "Messaging — Coming Soon",
+      "In-app messaging is being built. For now, use WhatsApp to contact the farmer.",
+    );
+  };
+
+  // ─── Entry styles ───
+  const imageStyle = useEntranceStyle(imageR, leave, {
+    translateY: [24, 0],
+    leaveDir: "up",
+  });
+
+  const topRowStyle = useEntranceStyle(topRowR, leave, {
+    translateX: [-20, 0],
+    motionStretchX: 1.12,
+    rotateFrom: -1,
+    leaveDir: "left",
+  });
+
+  // Location chip — slides from the right (opposite side vs category row)
+  // so the two pieces feel like they meet in the middle
+  const locationStyle = useEntranceStyle(locationR, leave, {
+    translateX: [14, 0],
+    scaleFrom: 0.88,
+    leaveDir: "right",
+  });
+
+  const titleStyle = useEntranceStyle(titleR, leave, {
+    translateY: [18, 0],
+    scaleFrom: 0.96,
+    motionStretchY: 1.1,
+    rotateFrom: 0.6,
+    leaveDir: "down",
+  });
+
+  const priceStyle = useEntranceStyle(priceR, leave, {
+    translateY: [16, 0],
+    scaleFrom: 0.92,
+    motionStretchY: 1.08,
+    leaveDir: "down",
+  });
+
+  const priceQtyStyle = useEntranceStyle(priceQtyR, leave, {
+    translateX: [14, 0],
+    motionStretchX: 1.1,
+    leaveDir: "right",
+  });
+
+  const descStyle = useEntranceStyle(descR, leave, {
+    translateY: [14, 0],
+    leaveDir: "down",
+  });
+
+  const aiWrapStyle = useEntranceStyle(aiWrapR, leave, {
+    translateY: [28, 0],
+    scaleFrom: 0.95,
+    motionStretchY: 1.08,
+    rotateFrom: -0.8,
+    leaveDir: "down",
+  });
+
+  const farmerStyle = useEntranceStyle(farmerR, leave, {
+    translateX: [-18, 0],
+    motionStretchX: 1.06,
+    rotateFrom: 0.6,
+    leaveDir: "left",
+  });
+
+  const trustStyle = useEntranceStyle(trustR, leave, {
+    translateY: [10, 0],
+    leaveDir: "down",
+  });
+
+  const metaStyle = useEntranceStyle(metaR, leave, {});
+
+  const actionBarStyle = useEntranceStyle(actionBarR, leave, {
+    translateY: [40, 0],
+    leaveDir: "down",
+  });
+
+  const heartBtnStyle = useEntranceStyle(heartBtnR, leave, {
+    translateY: [20, 0],
+    scaleFrom: 0.6,
+    motionStretchY: 1.1,
+  });
+  const waBtnStyle = useEntranceStyle(waBtnR, leave, {
+    translateY: [20, 0],
+    scaleFrom: 0.7,
+    motionStretchY: 1.12,
+  });
+  const msgBtnStyle = useEntranceStyle(msgBtnR, leave, {
+    translateY: [20, 0],
+    scaleFrom: 0.7,
+    motionStretchY: 1.12,
+  });
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <View style={styles.safe}>
         <View style={styles.loader}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!listing) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <View style={styles.safe}>
         <View style={styles.loader}>
           <Text style={styles.errorText}>Listing not found</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -194,29 +557,43 @@ export default function ListingDetailScreen({ route, navigation }) {
     primaryImage?.image_url || listing.listing_images?.[0]?.image_url;
   const ai = listing.ai_analysis;
 
+  // Resolve the most human-readable location for the LocationChip.
+  // Prefer farmer profile location (usually a proper city/region name)
+  // over the listing's own location_name (which CreateListing currently
+  // fills with raw coords as a fallback).
+  const chipLocation =
+    listing.farmer_profiles?.location_name || listing.location_name || null;
+
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView>
-        {/* Back button */}
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
+    <View style={styles.safe}>
+      <ScrollView
+        style={{ flex: 1 }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingBottom: spacing.md,
+          paddingTop: spacing.xxxl,
+        }}
+      >
+        <Pressable
+          style={[styles.backButton, { top: insets.top + spacing.md }]}
+          onPress={handleBack}
         >
           <Text style={styles.backText}>← Back</Text>
-        </TouchableOpacity>
+        </Pressable>
 
-        {/* Image */}
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.image} />
-        ) : (
-          <View style={styles.imagePlaceholder}>
-            <Text style={styles.placeholderText}>No photo</Text>
-          </View>
-        )}
+        <Animated.View style={imageStyle}>
+          {imageUrl ? (
+            <Image source={{ uri: imageUrl }} style={styles.image} />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Text style={styles.placeholderText}>No photo</Text>
+            </View>
+          )}
+        </Animated.View>
 
         <View style={styles.content}>
-          {/* Category and status */}
-          <View style={styles.topRow}>
+          {/* ─── Metadata row 1: category + organic ─── */}
+          <Animated.View style={[styles.topRow, topRowStyle]}>
             <Text style={styles.category}>
               {listing.produce_categories?.name}
             </Text>
@@ -225,149 +602,48 @@ export default function ListingDetailScreen({ route, navigation }) {
                 <Text style={styles.organicText}>Organic</Text>
               </View>
             ) : null}
-          </View>
+          </Animated.View>
 
-          {/* Title */}
-          <Text style={styles.title}>{listing.title}</Text>
+          {/* ─── Metadata row 2: LocationChip ─── */}
+          {chipLocation ? (
+            <Animated.View style={[styles.locationRow, locationStyle]}>
+              <LocationChip location={chipLocation} size="sm" />
+            </Animated.View>
+          ) : null}
 
-          {/* Price row */}
+          <Animated.Text style={[styles.title, titleStyle]}>
+            {listing.title}
+          </Animated.Text>
+
           <View style={styles.priceRow}>
-            <Text style={styles.price}>
+            <Animated.Text style={[styles.price, priceStyle]}>
               {formatZAR(listing.price)}/{listing.unit}
-            </Text>
-            <Text style={styles.quantity}>
+            </Animated.Text>
+            <Animated.Text style={[styles.quantity, priceQtyStyle]}>
               {listing.quantity} {listing.unit}s available
-            </Text>
+            </Animated.Text>
           </View>
 
-          {/* Description */}
           {listing.description ? (
-            <Text style={styles.description}>{listing.description}</Text>
+            <Animated.Text style={[styles.description, descStyle]}>
+              {listing.description}
+            </Animated.Text>
           ) : null}
 
-          {/* AI Analysis card */}
           {ai ? (
-            <View style={styles.aiCard}>
-              {/* Header: title + score */}
-              <View style={styles.aiHeader}>
-                <Text style={styles.aiTitle}>AI Quality Analysis</Text>
-                <View style={styles.aiScoreBadge}>
-                  <Text style={styles.aiScoreText}>
-                    {ai.condition_score}/10
-                  </Text>
-                </View>
-              </View>
-
-              {/* Confidence indicator — only shows when not high */}
-              {ai.raw_feedback?.confidence_level &&
-              ai.raw_feedback.confidence_level !== "high" ? (
-                <View style={styles.aiConfidence}>
-                  <Text style={styles.aiConfidenceText}>
-                    ⚠{" "}
-                    {ai.raw_feedback.confidence_level === "low"
-                      ? "Limited image quality — estimates are approximate"
-                      : "Some uncertainty in this assessment"}
-                  </Text>
-                </View>
-              ) : null}
-
-              {/* Variety + Harvest readiness */}
-              <View style={styles.aiKeyInfo}>
-                {ai.raw_feedback?.variety_identified ? (
-                  <Text style={styles.aiVariety}>
-                    {ai.raw_feedback.variety_identified}
-                  </Text>
-                ) : null}
-                {ai.raw_feedback?.harvest_readiness ? (
-                  <View
-                    style={[
-                      styles.aiHarvestBadge,
-                      ai.raw_feedback.harvest_readiness === "ready" &&
-                        styles.harvestReady,
-                      ai.raw_feedback.harvest_readiness === "soon" &&
-                        styles.harvestSoon,
-                      ai.raw_feedback.harvest_readiness === "not yet" &&
-                        styles.harvestNotYet,
-                      ai.raw_feedback.harvest_readiness === "overdue" &&
-                        styles.harvestOverdue,
-                    ]}
-                  >
-                    <Text style={styles.aiHarvestText}>
-                      {ai.raw_feedback.harvest_readiness === "ready"
-                        ? "✓ Ready to sell"
-                        : ai.raw_feedback.harvest_readiness === "soon"
-                          ? "◐ Almost ready"
-                          : ai.raw_feedback.harvest_readiness === "not yet"
-                            ? "○ Not yet"
-                            : "⚠ Overdue — sell now"}
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-
-              {/* Ripeness + Shelf life row */}
-              <View style={styles.aiStatsRow}>
-                {ai.ripeness_estimate ? (
-                  <View style={styles.aiStat}>
-                    <Text style={styles.aiStatLabel}>Ripeness</Text>
-                    <Text style={styles.aiStatValue}>
-                      {ai.ripeness_estimate}
-                    </Text>
-                  </View>
-                ) : null}
-                {ai.raw_feedback?.shelf_life_days != null ? (
-                  <View style={styles.aiStat}>
-                    <Text style={styles.aiStatLabel}>Shelf Life</Text>
-                    <Text style={styles.aiStatValue}>
-                      ~{ai.raw_feedback.shelf_life_days} days
-                    </Text>
-                  </View>
-                ) : null}
-              </View>
-
-              {/* Growth insight */}
-              {ai.growth_insight ? (
-                <Text style={styles.aiInsight}>{ai.growth_insight}</Text>
-              ) : null}
-
-              {/* Storage tip */}
-              {ai.raw_feedback?.storage_advice ? (
-                <View style={styles.aiTip}>
-                  <Text style={styles.aiTipText}>
-                    💡 {ai.raw_feedback.storage_advice}
-                  </Text>
-                </View>
-              ) : null}
-
-              {/* Seasonal note */}
-              {ai.raw_feedback?.seasonal_note ? (
-                <Text style={styles.aiSeasonal}>
-                  📅 {ai.raw_feedback.seasonal_note}
-                </Text>
-              ) : null}
-
-              {/* Price range + market insight */}
-              {ai.price_suggestion_min && ai.price_suggestion_max ? (
-                <View style={styles.aiPriceSection}>
-                  <View style={styles.aiPriceRow}>
-                    <Text style={styles.aiPriceLabel}>AI Price Range</Text>
-                    <Text style={styles.aiPriceValue}>
-                      {formatZAR(ai.price_suggestion_min)} –{" "}
-                      {formatZAR(ai.price_suggestion_max)}
-                    </Text>
-                  </View>
-                  {ai.raw_feedback?.market_insight ? (
-                    <Text style={styles.aiMarket}>
-                      {ai.raw_feedback.market_insight}
-                    </Text>
-                  ) : null}
-                </View>
-              ) : null}
-            </View>
+            <Animated.View style={aiWrapStyle}>
+              {/* v3: pass askingPrice + unit so AIDetailCard can render the
+                  new AIPriceScale with the farmer's actual price as a tick */}
+              <AIDetailCard
+                ai={ai}
+                leaving={isLeaving}
+                askingPrice={listing.price}
+                unit={listing.unit}
+              />
+            </Animated.View>
           ) : null}
 
-          {/* Farmer info + trust card */}
-          <View style={styles.farmerCard}>
+          <Animated.View style={[styles.farmerCard, farmerStyle]}>
             <View style={styles.farmerRow}>
               <View style={styles.farmerAvatar}>
                 <Text style={styles.farmerAvatarText}>
@@ -387,56 +663,73 @@ export default function ListingDetailScreen({ route, navigation }) {
                 ) : null}
               </View>
             </View>
-          </View>
 
-          {/* Trust breakdown */}
+            {isBuyer && listing.farmer_profiles?.id && !alreadyReviewed ? (
+              <Pressable
+                onPress={() => setShowReview(true)}
+                style={styles.reviewLink}
+                hitSlop={8}
+              >
+                <Text style={styles.reviewLinkText}>⭐ Rate this farmer</Text>
+              </Pressable>
+            ) : null}
+          </Animated.View>
+
           {listing.farmer_profiles?.id ? (
-            <FarmerTrustCard farmerProfileId={listing.farmer_profiles.id} />
+            <Animated.View style={trustStyle}>
+              <FarmerTrustCard farmerProfileId={listing.farmer_profiles.id} />
+            </Animated.View>
           ) : null}
 
-          {/* Meta info */}
-          <View style={styles.metaRow}>
+          <Animated.View style={[styles.metaRow, metaStyle]}>
             <Text style={styles.metaText}>
               {listing.view_count} views · {listing.save_count} saves
             </Text>
             <Text style={styles.metaText}>{timeAgo(listing.created_at)}</Text>
-          </View>
+          </Animated.View>
         </View>
       </ScrollView>
 
-      {/* Bottom action bar — only for buyers */}
       {isBuyer ? (
-        <View style={styles.actionBar}>
-          <TouchableOpacity
-            style={styles.saveButton}
-            onPress={handleSave}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.saveButtonText}>
-              {isSaved ? "♥ Saved" : "♡ Save"}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.contactButton}
-            onPress={handleContact}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.contactButtonText}>Contact Farmer</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
-      {/* Review button — only for buyers who haven't reviewed yet */}
-      {isBuyer && listing.farmer_profiles?.id && !alreadyReviewed ? (
-        <TouchableOpacity
-          style={styles.reviewButton}
-          onPress={() => setShowReview(true)}
-          activeOpacity={0.8}
+        <Animated.View
+          style={[
+            styles.actionBar,
+            { paddingBottom: spacing.sm },
+            actionBarStyle,
+          ]}
         >
-          <Text style={styles.reviewButtonText}>⭐ Rate this farmer</Text>
-        </TouchableOpacity>
+          <Animated.View style={heartBtnStyle}>
+            <SaveHeart isSaved={isSaved} onPress={handleSave} />
+          </Animated.View>
+
+          <Animated.View style={[{ flex: 1 }, waBtnStyle]}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.whatsappButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={handleWhatsApp}
+            >
+              <Text style={styles.whatsappIcon}>💬</Text>
+              <Text style={styles.whatsappText}>WhatsApp</Text>
+            </Pressable>
+          </Animated.View>
+
+          <Animated.View style={[{ flex: 1 }, msgBtnStyle]}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.messageButton,
+                pressed && styles.buttonPressed,
+              ]}
+              onPress={handleMessage}
+            >
+              <MessageCircle size={18} color="#fff" strokeWidth={2.2} />
+              <Text style={styles.messageText}>Message</Text>
+            </Pressable>
+          </Animated.View>
+        </Animated.View>
       ) : null}
 
-      {/* Review modal */}
       <Modal
         visible={showReview}
         animationType="slide"
@@ -459,7 +752,7 @@ export default function ListingDetailScreen({ route, navigation }) {
           onCancel={() => setShowReview(false)}
         />
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -467,12 +760,12 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   loader: { flex: 1, justifyContent: "center", alignItems: "center" },
   errorText: { fontSize: fonts.body, color: colors.textSecondary },
+
   backButton: {
     position: "absolute",
-    top: spacing.md,
     left: spacing.md,
     zIndex: 10,
-    backgroundColor: "rgba(255,255,255,0.9)",
+    backgroundColor: "rgba(255,255,255,0.92)",
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
@@ -482,6 +775,7 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.textPrimary,
   },
+
   image: { width: "100%", height: 280 },
   imagePlaceholder: {
     width: "100%",
@@ -491,7 +785,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   placeholderText: { color: colors.textTertiary },
-  content: { padding: spacing.lg },
+
+  // ─── v3 SPACING FIX ───
+  // Previous: padding: spacing.lg (uniform). That put ~24px between the
+  // image bottom and the category label, which the user (correctly)
+  // flagged as too much. Now: tighter top, preserved horizontal, slightly
+  // tighter bottom. The intro block reads as attached to the image.
+  content: {
+    paddingTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+  },
+
   topRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -515,11 +820,19 @@ const styles = StyleSheet.create({
     color: colors.primaryDark,
     fontWeight: "600",
   },
+
+  // ─── NEW v3: location row ───
+  locationRow: {
+    marginBottom: spacing.sm,
+  },
+
+  // Title — tightened from spacing.sm → spacing.xs so it feels connected
+  // to the price row below it, not floating.
   title: {
     fontSize: fonts.h1,
     fontWeight: "700",
     color: colors.textPrimary,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
   priceRow: {
     flexDirection: "row",
@@ -535,37 +848,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: spacing.lg,
   },
-  aiCard: {
-    backgroundColor: colors.aiBadgeLight,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    marginBottom: spacing.lg,
-  },
-  aiHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: spacing.sm,
-  },
-  aiTitle: { fontSize: fonts.body, fontWeight: "600", color: colors.aiBadge },
-  aiScoreBadge: {
-    backgroundColor: colors.aiBadge,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-  },
-  aiScoreText: { color: "#fff", fontSize: fonts.caption, fontWeight: "700" },
-  aiDetail: {
-    fontSize: fonts.caption,
-    color: colors.textPrimary,
-    marginBottom: 4,
-  },
-  aiPrice: {
-    fontSize: fonts.caption,
-    color: colors.aiBadge,
-    fontWeight: "600",
-    marginTop: spacing.xs,
-  },
+
   farmerCard: {
     backgroundColor: colors.backgroundSecondary,
     borderRadius: radius.lg,
@@ -593,176 +876,98 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: colors.textPrimary,
   },
-  farmerRating: {
-    fontSize: fonts.caption,
-    color: colors.warning,
-    marginTop: 2,
-  },
   farmerLocation: {
     fontSize: fonts.caption,
     color: colors.textSecondary,
-    marginTop: spacing.sm,
+    marginTop: 2,
   },
+  reviewLink: {
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.borderLight,
+  },
+  reviewLinkText: {
+    fontSize: fonts.caption,
+    color: colors.textPrimary,
+    fontWeight: "600",
+  },
+
   metaRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     marginBottom: spacing.lg,
   },
   metaText: { fontSize: fonts.small, color: colors.textTertiary },
+
+  // ─── Action bar ───
   actionBar: {
     flexDirection: "row",
-    padding: spacing.md,
-    gap: spacing.md,
-    borderTopWidth: 1,
+    alignItems: "center",
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    gap: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: colors.borderLight,
     backgroundColor: colors.background,
   },
-  saveButton: {
-    flex: 1,
+  heartButton: {
+    width: 48,
     height: 48,
-    borderWidth: 1.5,
-    borderColor: colors.primary,
-    borderRadius: radius.md,
+    borderRadius: 24,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: colors.backgroundSecondary,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
+    overflow: "visible",
   },
-  saveButtonText: {
-    color: colors.primary,
-    fontSize: fonts.body,
-    fontWeight: "600",
-  },
-  contactButton: {
-    flex: 2,
+  heartBurst: {
+    position: "absolute",
+    width: 48,
     height: 48,
+    borderRadius: 24,
+    backgroundColor: "rgba(229, 62, 62, 0.35)",
+  },
+  heartFillWrap: { justifyContent: "center", alignItems: "center" },
+
+  whatsappButton: {
+    width: "100%",
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#25D366",
+    borderRadius: radius.md,
+  },
+  whatsappIcon: { fontSize: 16 },
+  whatsappText: {
+    color: "#fff",
+    fontSize: fonts.caption,
+    fontWeight: "700",
+    letterSpacing: 0.2,
+  },
+
+  messageButton: {
+    width: "100%",
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     backgroundColor: colors.primary,
     borderRadius: radius.md,
-    justifyContent: "center",
-    alignItems: "center",
   },
-  contactButtonText: {
+  messageText: {
     color: "#fff",
-    fontSize: fonts.body,
-    fontWeight: "600",
-  },
-  aiKeyInfo: {
-    marginBottom: spacing.md,
-  },
-  aiVariety: {
-    fontSize: fonts.body,
-    fontWeight: "600",
-    color: colors.aiBadge,
-    marginBottom: spacing.xs,
-  },
-  aiHarvestBadge: {
-    alignSelf: "flex-start",
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
-    marginTop: spacing.xs,
-  },
-  harvestReady: { backgroundColor: colors.primaryLight },
-  harvestSoon: { backgroundColor: "#FFF3CD" },
-  harvestNotYet: { backgroundColor: colors.backgroundTertiary },
-  harvestOverdue: { backgroundColor: "#FEE2E2" },
-  aiHarvestText: {
     fontSize: fonts.caption,
-    fontWeight: "600",
-    color: colors.textPrimary,
-  },
-  aiConfidence: {
-    backgroundColor: "#FFF8E1",
-    borderRadius: radius.sm,
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  aiConfidenceText: {
-    fontSize: fonts.small,
-    color: "#B8860B",
-  },
-  aiStatsRow: {
-    flexDirection: "row",
-    marginBottom: spacing.md,
-  },
-  aiStat: {
-    flex: 1,
-    backgroundColor: colors.aiBadge + "08",
-    borderRadius: radius.sm,
-    padding: spacing.sm,
-    marginRight: spacing.sm,
-  },
-  aiStatLabel: {
-    fontSize: 10,
-    color: colors.textTertiary,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  aiStatValue: {
-    fontSize: fonts.caption,
-    fontWeight: "600",
-    color: colors.textPrimary,
-  },
-  aiInsight: {
-    fontSize: fonts.caption,
-    color: colors.textPrimary,
-    lineHeight: 20,
-    marginBottom: spacing.sm,
-  },
-  aiTip: {
-    backgroundColor: colors.aiBadge + "10",
-    borderRadius: radius.sm,
-    padding: spacing.sm,
-    marginBottom: spacing.sm,
-  },
-  aiTipText: {
-    fontSize: fonts.small,
-    color: colors.textPrimary,
-    lineHeight: 18,
-  },
-  aiSeasonal: {
-    fontSize: fonts.small,
-    color: colors.textSecondary,
-    marginBottom: spacing.md,
-  },
-  aiPriceSection: {
-    paddingTop: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: colors.aiBadge + "20",
-  },
-  aiPriceRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  aiPriceLabel: {
-    fontSize: fonts.small,
-    color: colors.textSecondary,
-  },
-  aiPriceValue: {
-    fontSize: fonts.body,
     fontWeight: "700",
-    color: colors.aiBadge,
+    letterSpacing: 0.2,
   },
-  aiMarket: {
-    fontSize: fonts.small,
-    color: colors.textSecondary,
-    fontStyle: "italic",
-    marginTop: spacing.xs,
-  },
-  reviewButton: {
-    margin: spacing.md,
-    marginTop: 0,
-    height: 44,
-    backgroundColor: colors.warning + "15",
-    borderWidth: 1,
-    borderColor: colors.warning + "40",
-    borderRadius: radius.md,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  reviewButtonText: {
-    color: colors.textPrimary,
-    fontSize: fonts.caption,
-    fontWeight: "600",
+
+  buttonPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
   },
 });

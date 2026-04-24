@@ -61,22 +61,23 @@ import { supabase } from "../config/supabase";
 
 /** Scoring weights — tuned for agricultural marketplace dynamics */
 const W = {
-  categoryMatch: 0.30,
-  aiQuality: 0.20,
+  categoryMatch: 0.25,
+  aiQuality: 0.2,
   freshness: 0.15,
   novelty: 0.15,
-  popularity: 0.10,
-  priceFit: 0.10,
+  popularity: 0.1,
+  priceFit: 0.1,
+  proximity: 0.05,
 };
 
 /** Signal weights — must match recommendation_interactions DB view */
 const SIGNAL = {
-  view_short: 1.0,  // <30 second view
-  view_long: 2.0,   // >30 second view
-  save: 3.0,        // saved to favourites
-  search: 2.5,      // searched for this category
-  filter: 1.5,      // tapped category filter
-  contact: 5.0,     // contacted the farmer
+  view_short: 1.0, // <30 second view
+  view_long: 2.0, // >30 second view
+  save: 3.0, // saved to favourites
+  search: 2.5, // searched for this category
+  filter: 1.5, // tapped category filter
+  contact: 5.0, // contacted the farmer
 };
 
 /** Temporal decay half-life in days */
@@ -164,7 +165,7 @@ const buildBuyerProfile = async (buyerId) => {
       supabase
         .from("browsing_history")
         .select(
-          "listing_id, duration_seconds, viewed_at, source, listings ( category_id, price, ai_analysis ( condition_score ) )"
+          "listing_id, duration_seconds, viewed_at, source, listings ( category_id, price, ai_analysis ( condition_score ) )",
         )
         .eq("buyer_id", buyerId)
         .order("viewed_at", { ascending: false })
@@ -173,14 +174,14 @@ const buildBuyerProfile = async (buyerId) => {
       supabase
         .from("saved_listings")
         .select(
-          "listing_id, saved_at, listings ( category_id, price, ai_analysis ( condition_score ) )"
+          "listing_id, saved_at, listings ( category_id, price, ai_analysis ( condition_score ) )",
         )
         .eq("buyer_id", buyerId),
 
       supabase
         .from("contact_events")
         .select(
-          "listing_id, contacted_at, listings ( category_id, price, ai_analysis ( condition_score ) )"
+          "listing_id, contacted_at, listings ( category_id, price, ai_analysis ( condition_score ) )",
         )
         .eq("buyer_id", buyerId),
 
@@ -207,9 +208,8 @@ const buildBuyerProfile = async (buyerId) => {
     const d = decay(v.viewed_at);
 
     // Boost repeat views — if we've seen this listing before, it's stronger
-    const isRepeat = views.filter(
-      (other) => other.listing_id === v.listing_id
-    ).length > 1;
+    const isRepeat =
+      views.filter((other) => other.listing_id === v.listing_id).length > 1;
     const repeatMultiplier = isRepeat ? 1.5 : 1.0;
 
     profile.categoryAffinity[catId] =
@@ -282,11 +282,28 @@ const buildBuyerProfile = async (buyerId) => {
   // ── Normalise category affinity to 0–1 ──
   const maxAffinity = Math.max(
     ...Object.values(profile.categoryAffinity),
-    0.001
+    0.001,
   );
   Object.keys(profile.categoryAffinity).forEach((catId) => {
     profile.categoryAffinity[catId] /= maxAffinity;
   });
+
+  if (onboardingData) {
+    // Category affinity boost
+    onboardingData.selectedCategories.forEach((catId) => {
+      profile.categoryAffinity[catId] = 0.8; // Strong initial signal
+    });
+
+    // Price range seeding
+    if (onboardingData.priceRange) {
+      const { min, max } = onboardingData.priceRange;
+      profile.pricePoints.push(
+        { price: min, weight: 2.0 },
+        { price: max, weight: 2.0 },
+        { price: (min + max) / 2, weight: 3.0 },
+      );
+    }
+  }
 
   // ── Compute price sensitivity ──
   let avgPrice = 0;
@@ -294,7 +311,7 @@ const buildBuyerProfile = async (buyerId) => {
   if (profile.pricePoints.length > 0) {
     const totalWeight = profile.pricePoints.reduce(
       (sum, p) => sum + p.weight,
-      0
+      0,
     );
     avgPrice =
       profile.pricePoints.reduce((sum, p) => sum + p.price * p.weight, 0) /
@@ -304,7 +321,7 @@ const buildBuyerProfile = async (buyerId) => {
     const variance =
       profile.pricePoints.reduce(
         (sum, p) => sum + p.weight * Math.pow(p.price - avgPrice, 2),
-        0
+        0,
       ) / totalWeight;
     priceStdDev = Math.sqrt(variance) || 20;
   }
@@ -346,7 +363,7 @@ const fetchCandidates = async () => {
       produce_categories ( id, name ),
       ai_analysis ( condition_score, ripeness_estimate ),
       listing_images ( image_url, is_primary )
-    `
+    `,
     )
     .eq("status", "active")
     .order("created_at", { ascending: false })
@@ -368,8 +385,7 @@ const fetchCandidates = async () => {
  */
 const scoreListing = (listing, buyerProfile, globalStats) => {
   // ── Category Match (0.30) ──
-  const categoryMatch =
-    buyerProfile.categoryAffinity[listing.category_id] || 0;
+  const categoryMatch = buyerProfile.categoryAffinity[listing.category_id] || 0;
 
   // ── AI Quality (0.20) ──
   const aiScore = listing.ai_analysis?.condition_score || 0;
@@ -397,7 +413,7 @@ const scoreListing = (listing, buyerProfile, globalStats) => {
       ? gaussian(
           Number(listing.price),
           buyerProfile.avgPrice,
-          buyerProfile.priceStdDev
+          buyerProfile.priceStdDev,
         )
       : 0.5; // neutral for new buyers
 
@@ -476,7 +492,7 @@ const applyDiversity = (rankedListings, limit) => {
 const coldStartRanking = (candidates) => {
   const maxPop = Math.max(
     ...candidates.map((l) => (l.view_count || 0) + (l.save_count || 0) * 2),
-    1
+    1,
   );
 
   return candidates
@@ -561,7 +577,7 @@ export const getRecommendations = async (buyerProfileId, limit = 20) => {
 
     // Compute global stats for normalisation
     const popScores = candidates.map(
-      (l) => (l.view_count || 0) + (l.save_count || 0) * 2
+      (l) => (l.view_count || 0) + (l.save_count || 0) * 2,
     );
     const globalStats = {
       minPop: Math.min(...popScores),

@@ -18,14 +18,16 @@ import { supabase } from "../config/supabase";
 export const getActiveListings = async (filters = {}) => {
   let query = supabase
     .from("listings")
-    .select(`
+    .select(
+      `
       id, title, description, price, quantity, unit, 
       location_name, is_organic, view_count, save_count, created_at,
       farmer_profiles ( id, farm_name, avg_rating, is_verified ),
       produce_categories ( id, name, icon_url ),
       ai_analysis ( condition_score, ripeness_estimate ),
       listing_images ( id, image_url, is_primary )
-    `)
+    `,
+    )
     .eq("status", "active")
     .order("created_at", { ascending: false });
 
@@ -54,7 +56,8 @@ export const getActiveListings = async (filters = {}) => {
 export const getListingById = async (listingId) => {
   const { data, error } = await supabase
     .from("listings")
-    .select(`
+    .select(
+      `
       id, title, description, price, quantity, unit, status,
       location_name, location, is_organic, view_count, save_count,
       created_at, updated_at,
@@ -62,7 +65,8 @@ export const getListingById = async (listingId) => {
       produce_categories ( id, name ),
       ai_analysis ( condition_score, ripeness_estimate, growth_insight, price_suggestion_min, price_suggestion_max ),
       listing_images ( id, image_url, is_primary )
-    `)
+    `,
+    )
     .eq("id", listingId)
     .single();
 

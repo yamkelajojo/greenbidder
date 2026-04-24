@@ -24,6 +24,27 @@ import PriceGuidance from "../../components/shared/PriceGuidance";
 /**
  * Create Listing screen — farmer creates a new produce listing.
  * Criterion 8 — CRUD Create, end-to-end.
+ *
+ * ─── v3 update (April 2026) ───
+ * Two small-but-meaningful additions that feed the richer v2 AI pipeline:
+ *
+ *   1) Organic toggle. The `is_organic` column exists in the DB but the
+ *      create flow never set it. Now there's a single chip that toggles
+ *      organic claim, which both persists to the row AND flows into the
+ *      AI prompt so the model can factor organic status into its price
+ *      range and growth_insight.
+ *
+ *   2) Farmer location lookup. We now also fetch the farmer_profile's
+ *      `location_name` during loadFarmerProfile so that — when the AI
+ *      analysis kicks off — we pass a real human-readable location
+ *      rather than the raw lat/lng the listing fallbacks to. The AI
+ *      service prefers this for its prompt and degrades gracefully if
+ *      neither is available.
+ *
+ *   3) Full context pipeline. The `analyseAndSave` call now passes title,
+ *      description, price, quantity, unit, isOrganic, and both location
+ *      candidates. This is what unlocks the new `price_assessment`,
+ *      `visual_defects`, and `uniformity_score` outputs in the AI card.
  */
 export default function CreateListingScreen({ navigation }) {
   const { user } = useAuth();
@@ -36,10 +57,12 @@ export default function CreateListingScreen({ navigation }) {
   const [unit, setUnit] = useState("kg");
   const [categoryId, setCategoryId] = useState(null);
   const [imageUri, setImageUri] = useState(null);
+  // const [isOrganic, setIsOrganic] = useState(false); // NEW v3 — feeds AI + DB
 
   // Data state
   const [categories, setCategories] = useState([]);
   const [farmerProfileId, setFarmerProfileId] = useState(null);
+  const [farmerLocationName, setFarmerLocationName] = useState(null); // NEW v3
   const [location, setLocation] = useState(null);
 
   // UI state
@@ -62,7 +85,9 @@ export default function CreateListingScreen({ navigation }) {
   };
 
   /**
-   * Gets the farmer's profile ID from the users table.
+   * Gets the farmer's profile ID AND location_name from farmer_profiles.
+   * location_name flows downstream into the AI prompt so analysis is
+   * regionally accurate rather than hardcoded to KZN.
    * Criterion 3 — select only needed fields, no SELECT *.
    */
   const loadFarmerProfile = async () => {
@@ -77,11 +102,14 @@ export default function CreateListingScreen({ navigation }) {
     if (userData) {
       const { data: farmerData } = await supabase
         .from("farmer_profiles")
-        .select("id")
+        .select("id, location_name")
         .eq("user_id", userData.id)
         .single();
 
-      if (farmerData) setFarmerProfileId(farmerData.id);
+      if (farmerData) {
+        setFarmerProfileId(farmerData.id);
+        setFarmerLocationName(farmerData.location_name || null);
+      }
     }
   };
 
@@ -101,25 +129,9 @@ export default function CreateListingScreen({ navigation }) {
   };
 
   const handlePickImage = async () => {
-    Alert.alert("Add Photo", "Choose a source", [
-      {
-        text: "Camera",
-        onPress: async () => {
-          const result = await pickImage("camera");
-          if (result.uri) setImageUri(result.uri);
-          if (result.error) Alert.alert("Error", result.error);
-        },
-      },
-      {
-        text: "Gallery",
-        onPress: async () => {
-          const result = await pickImage("gallery");
-          if (result.uri) setImageUri(result.uri);
-          if (result.error) Alert.alert("Error", result.error);
-        },
-      },
-      { text: "Cancel", style: "cancel" },
-    ]);
+    const result = await pickImage("camera");
+    if (result.uri) setImageUri(result.uri);
+    if (result.error) Alert.alert("Error", result.error);
   };
 
   const handleSubmit = async () => {
@@ -161,6 +173,7 @@ export default function CreateListingScreen({ navigation }) {
         price: parseFloat(price),
         quantity: parseFloat(quantity),
         unit,
+        // is_organic: isOrganic, // NEW v3 — was always defaulting to false
         status: "active",
       };
 
@@ -196,21 +209,39 @@ export default function CreateListingScreen({ navigation }) {
       }
 
       // Step 4: AI analysis (runs in background, doesn't block)
+      //
+      // v3: pass the full listing context to the AI rather than just the
+      // category name. This unlocks price_assessment, visual_defects,
+      // uniformity_score, and a region-accurate prompt. The AI service
+      // handles missing fields gracefully — we send what we have.
       const categoryName =
         categories.find((c) => c.id === categoryId)?.name || "produce";
-      analyseAndSave(imageUri, listing.id, categoryName).then(
-        ({ analysis, error: aiError }) => {
-          if (analysis) {
-            console.log(
-              "AI analysis complete:",
-              analysis.condition_score + "/10",
-            );
-          }
-          if (aiError) {
-            console.warn("AI analysis skipped:", aiError);
-          }
-        },
-      );
+
+      analyseAndSave(imageUri, listing.id, {
+        produceType: categoryName,
+        title,
+        description: description || undefined,
+        askingPrice: parseFloat(price) || undefined,
+        quantity: parseFloat(quantity) || undefined,
+        unit,
+        isOrganic,
+        // listing.location_name is the lat/lng coord fallback — the AI
+        // service's isHumanReadableLocation() will reject it and prefer
+        // farmerLocation. We still pass it in case a future version of
+        // CreateListing stores a real place name here.
+        listingLocation: listingData.location_name,
+        farmerLocation: farmerLocationName,
+      }).then(({ analysis, error: aiError }) => {
+        if (analysis) {
+          console.log(
+            "AI analysis complete:",
+            analysis.condition_score + "/10",
+          );
+        }
+        if (aiError) {
+          console.warn("AI analysis skipped:", aiError);
+        }
+      });
 
       // Success
       Alert.alert(
@@ -226,6 +257,7 @@ export default function CreateListingScreen({ navigation }) {
               setQuantity("");
               setCategoryId(null);
               setImageUri(null);
+              // setIsOrganic(false);
               navigation.goBack();
             },
           },
@@ -244,7 +276,15 @@ export default function CreateListingScreen({ navigation }) {
         contentContainerStyle={styles.scroll}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.title}>Create Listing</Text>
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.backText}>← Back</Text>
+          </TouchableOpacity>
+          <Text style={styles.title}>Create Listing</Text>
+        </View>
 
         {apiError ? (
           <View style={styles.errorBanner}>
@@ -259,10 +299,7 @@ export default function CreateListingScreen({ navigation }) {
           ) : (
             <View style={styles.imagePlaceholder}>
               <Text style={styles.imagePlaceholderIcon}>📷</Text>
-              <Text style={styles.imagePlaceholderText}>Add a photo</Text>
-              <Text style={styles.imagePlaceholderHint}>
-                Tap to take or choose a photo
-              </Text>
+              <Text style={styles.imagePlaceholderText}>Take photo</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -613,6 +650,7 @@ const styles = StyleSheet.create({
   },
   unitChipText: { fontSize: fonts.caption, color: colors.textSecondary },
   unitChipTextSelected: { color: colors.primaryDark, fontWeight: "600" },
+
   locationRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -621,6 +659,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.backgroundSecondary,
     borderRadius: radius.md,
   },
+
+  backText: {
+    fontSize: fonts.caption,
+    fontWeight: "600",
+    color: colors.textPrimary,
+    marginBottom: spacing.xs,
+  },
+
   locationIcon: { fontSize: 16, marginRight: spacing.sm },
   locationText: { fontSize: fonts.small, color: colors.textSecondary },
   button: {

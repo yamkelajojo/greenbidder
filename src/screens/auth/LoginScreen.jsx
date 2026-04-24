@@ -155,6 +155,30 @@ export default function LoginScreen({ navigation }) {
                 </Text>
               </TactilePressable>
             </FadeSlideIn>
+
+            <FadeSlideIn delay={790}>
+              <View style={styles.socialContainer}>
+                <Text style={styles.socialLabel}>Or continue with</Text>
+                <View style={styles.socialButtons}>
+                  <TactilePressable
+                    style={styles.socialButton}
+                    disabled={true} // Placeholder
+                    onPress={() => {}}
+                  >
+                    <Image source={require("../../assets/google.png")} />
+                    <Text>Google</Text>
+                  </TactilePressable>
+                  <TactilePressable
+                    style={styles.socialButton}
+                    disabled={true} // Placeholder
+                    onPress={() => {}}
+                  >
+                    <Image source={require("../../assets/apple.png")} />
+                    <Text>Apple</Text>
+                  </TactilePressable>
+                </View>
+              </View>
+            </FadeSlideIn>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

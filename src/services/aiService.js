@@ -161,7 +161,7 @@ export const analyseProduceImage = async (imageUri, context = {}) => {
       ? `Compare the farmer's asking price (R${Number(context.askingPrice).toFixed(2)}/${context.unit || "unit"}) to your estimated price range. Return a price_assessment object with verdict ("fair", "underpriced", or "overpriced"), margin_percent (signed — positive means above your midpoint, negative means below), and a 1-sentence reasoning.`
       : `No asking price was provided. Return null for price_assessment.`;
 
-    const prompt = `You are GreenBidder's senior agricultural produce analyst for South Africa. You analyze photos with agricultural expertise, practical farm knowledge, and strict uncertainty management. You blend visual evidence with the farmer-provided context below — treating the farmer's claims as input to verify or gently contradict, not as ground truth.
+    const prompt = `You are GreenBidder's senior agricultural produce analyst for South Africa. You analyze produce photos with agricultural expertise, practical farm knowledge, and strict uncertainty management. You blend visual evidence with the farmer-provided context below — treating the farmer's claims as input to verify or gently contradict, not as ground truth.
 
 INPUTS:
 - Location: ${location}
@@ -180,9 +180,12 @@ CRITICAL OUTPUT RULES:
 - Return ONLY valid JSON. No markdown, no backticks, no commentary, no explanation outside the JSON structure.
 - Use double quotes for all strings.
 - All numeric fields must be numbers, not strings.
-- If uncertain, use cautious wording and the fallback variety "Standard ${produceType}". Do not invent specific varieties from unclear images.
+- If uncertain, be explicit *inside the JSON fields* (e.g., "likely", "unclear", "cannot confirm from photo") and lower confidence_level — do not invent specifics.
+- If only 1-2 items are visible, treat uniformity and defect prevalence as uncertain and mention the limited sample in growth_insight.
+- If uncertain about variety, use the fallback variety "Standard ${produceType}". Do not invent specific cultivars from unclear images.
 - Base prices on broad South African market knowledge, the region stated above, seasonal supply, visible condition, organic/conventional, and typical demand. Do not claim exact real-time prices.
 - If the farmer's title or description makes a claim the image does not support (e.g. "Grade A" but visible bruising), reflect this in growth_insight calmly — do not shame the farmer, just be honest.
+- Keep wording simple and practical for rural South African farmers (short sentences, actionable advice, avoid jargon).
 
 OUTPUT JSON SCHEMA:
 {
@@ -197,8 +200,8 @@ OUTPUT JSON SCHEMA:
   "visual_defects": [
     "<string: short observation (3-6 words), e.g. 'minor bruising on 2 items', 'uniform color', 'slight stem dehydration', 'excellent skin finish'. Include BOTH positive observations and negative ones. 0 to 5 items. Empty array if image too unclear.>"
   ],
-  "growth_insight": "<string: 2-3 sentences on visible quality, blemishes, disease, dehydration, how this compares to typical ${produceType} in ${season} in this region, and — if relevant — whether the farmer's claims match the image>",
-  "storage_advice": "<string: 1 concise sentence on best short-term storage for this stage>",
+  "growth_insight": "<string: 2-3 short sentences on visible quality (including defects), how this compares to typical ${produceType} in ${season} in this region, and — if relevant — whether the farmer's claims match the image. Mention if the photo shows only a small sample.>",
+  "storage_advice": "<string: 1 short, practical sentence on best short-term storage for this stage (assume limited cold storage unless clearly stated)>",
   "seasonal_note": "<string: 1 concise sentence on ${produceType} supply status in ${month} in this region>",
   "price_suggestion_min": <number: floor price in ZAR per ${context.unit || "unit"}>,
   "price_suggestion_max": <number: ceiling price in ZAR per ${context.unit || "unit"}>,
@@ -225,7 +228,7 @@ FIELD-SPECIFIC GUIDELINES:
 - uniformity_score: Single most-important batch-consistency signal for bulk buyers.
 - visual_defects: Structured observations a filter or sort could use. Mix positives and negatives. Short phrases.
 - growth_insight: Prose that ties it all together. Mention farmer claim alignment if notable.
-- storage_advice: Simple, actionable, for a rural farmer without cold storage.
+- storage_advice: Simple and actionable, for a rural farmer without cold storage unless the context states they have it.
 - seasonal_note: Tie to current month and season in the stated region.
 - price_suggestion_min/max: Realistic per-${context.unit || "unit"} range in ZAR reflecting quality, ripeness, and regional demand.
 - market_insight: Whether this batch is likely priced below, near, or above average for ${month}.

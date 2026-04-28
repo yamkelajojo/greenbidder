@@ -1,30 +1,20 @@
-import { NavigationContainer } from "@react-navigation/native";
-import { useAuth } from "../hooks/useAuth";
-import { useOnboarding } from "../hooks/useOnboarding";
-import AuthStack from "./AuthStack";
-import MainTabs from "./MainTabs";
-import OnboardingStack from "./OnboardingStack"; // NEW
+import React from "react";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import LoginScreen from "../screens/auth/LoginScreen";
+import RegisterScreen from "../screens/auth/RegisterScreen";
 
-export default function RootNavigator() {
-  const { user, isLoading } = useAuth();
-  const { completedSteps } = useOnboarding();
+const Stack = createNativeStackNavigator();
 
-  if (isLoading) return <LoadingScreen />;
-
-  // NEW: Check onboarding completion
-  const isOnboardingComplete = user
-    ? checkOnboardingComplete(user, completedSteps)
-    : false;
-
+export default function AuthStack() {
   return (
-    <NavigationContainer>
-      {!user ? (
-        <OnboardingStack /> // Welcome carousel + location
-      ) : !isOnboardingComplete ? (
-        <OnboardingStack /> // Role-specific onboarding
-      ) : (
-        <MainTabs />
-      )}
-    </NavigationContainer>
+    <Stack.Navigator
+      screenOptions={{
+        headerShown: false,
+        animation: "slide_from_right",
+      }}
+    >
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="Register" component={RegisterScreen} />
+    </Stack.Navigator>
   );
 }

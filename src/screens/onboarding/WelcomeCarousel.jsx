@@ -1,17 +1,9 @@
 // src/screens/onboarding/WelcomeCarousel.jsx
 import React, { useRef, useState } from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  Image,
-  StatusBar,
-} from "react-native";
+import { View, Text, StyleSheet, Dimensions, StatusBar } from "react-native";
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   interpolate,
   Extrapolate,
 } from "react-native-reanimated";
@@ -34,7 +26,9 @@ const SLIDES = [
     title: "Know Exactly\nWhat You're Buying",
     subtitle:
       "Our AI analyzes freshness, ripeness, and quality from every photo — so you never guess.",
-    image: require("../../assets/onboarding/ai-scan.png"), // Create this asset
+    usePlaceholder: true,
+    placeholderIcon: "🤖",
+    placeholderColor: colors.success,
     badge: "10,000+ listings analyzed",
     accentColor: colors.success,
   },
@@ -43,7 +37,9 @@ const SLIDES = [
     title: "Your Feed Learns\nYour Taste",
     subtitle:
       "Smart recommendations adapt to what you love — based on what you view, save, and buy.",
-    image: require("../../assets/onboarding/personalized-feed.png"),
+    usePlaceholder: true,
+    placeholderIcon: "🎯",
+    placeholderColor: colors.primary,
     badge: "Powered by behavioral AI",
     accentColor: colors.primary,
   },
@@ -52,7 +48,9 @@ const SLIDES = [
     title: "Fair Prices,\nAlways",
     subtitle:
       "Real-time market data + AI suggestions ensure farmers price fairly and buyers get value.",
-    image: require("../../assets/onboarding/market-chart.png"),
+    usePlaceholder: true,
+    placeholderIcon: "📊",
+    placeholderColor: colors.warning,
     badge: "Live price tracking",
     accentColor: colors.warning,
   },
@@ -65,7 +63,6 @@ export default function WelcomeCarousel() {
   const pagerRef = useRef(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
-  // Animation values
   const scrollOffset = useSharedValue(0);
   const isLastSlide = activeIndex === SLIDES.length - 1;
 
@@ -73,29 +70,26 @@ export default function WelcomeCarousel() {
   const handlePageSelected = (e) => {
     const index = e.nativeEvent.position;
     setActiveIndex(index);
-    haptic.selection(); // Subtle haptic on slide change
+    haptic.selection();
   };
 
   const handleNext = () => {
     if (activeIndex < SLIDES.length - 1) {
       pagerRef.current?.setPage(activeIndex + 1);
     } else {
-      // Final slide: proceed to location permission
       markStepComplete("welcome");
-      setHasGrantedLocation(false); // Reset for fresh permission request
+      setHasGrantedLocation(false);
       navigation.replace("LocationPermission");
     }
   };
 
   const handleSkip = () => {
-    // Allow skipping carousel but still mark as seen
     markStepComplete("welcome");
     navigation.replace("LocationPermission");
   };
 
   // ── ANIMATED STYLES ──────────────────────────────────────────
   const imageAnimatedStyle = useAnimatedStyle(() => {
-    // Parallax effect: image moves slower than slide
     const translateX = interpolate(
       scrollOffset.value,
       [
@@ -149,6 +143,8 @@ export default function WelcomeCarousel() {
     return { opacity, transform: [{ translateY }] };
   });
 
+  const currentSlide = SLIDES[activeIndex];
+
   // ── RENDER ───────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -175,14 +171,27 @@ export default function WelcomeCarousel() {
       >
         {SLIDES.map((slide, index) => (
           <View key={slide.id} style={styles.slide} collapsable={false}>
-            {/* Image with parallax */}
-            <Animated.View style={[styles.imageContainer, imageAnimatedStyle]}>
-              <Image
-                source={slide.image}
-                style={styles.image}
-                resizeMode="contain"
-              />
-            </Animated.View>
+            {/* Image/Placeholder with parallax */}
+            <View style={styles.imageContainer}>
+              {slide.usePlaceholder ? (
+                <View
+                  style={[
+                    styles.placeholderContainer,
+                    { backgroundColor: slide.placeholderColor + "20" },
+                  ]}
+                >
+                  <Text style={styles.placeholderIcon}>
+                    {slide.placeholderIcon}
+                  </Text>
+                </View>
+              ) : (
+                <Animated.View
+                  style={[styles.imageContainer, imageAnimatedStyle]}
+                >
+                  {/* No image to render since usePlaceholder is always true */}
+                </Animated.View>
+              )}
+            </View>
 
             {/* Content */}
             <View style={styles.content}>
@@ -221,13 +230,13 @@ export default function WelcomeCarousel() {
         <ProgressBar
           current={activeIndex + 1}
           total={SLIDES.length}
-          accentColor={SLIDES[activeIndex].accentColor}
+          accentColor={currentSlide.accentColor}
         />
 
         <TactilePressable
           style={[
             styles.nextButton,
-            { backgroundColor: SLIDES[activeIndex].accentColor },
+            { backgroundColor: currentSlide.accentColor },
           ]}
           onPress={handleNext}
           haptic="commit"
@@ -275,9 +284,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.xl,
   },
-  image: {
+  placeholderContainer: {
     width: SCREEN_WIDTH * 0.8,
     height: SCREEN_WIDTH * 0.6,
+    borderRadius: radius.xl,
+    justifyContent: "center",
+    alignItems: "center",
+    borderWidth: 2,
+    borderColor: colors.primary,
+    borderStyle: "dashed",
+  },
+  placeholderIcon: {
+    fontSize: 120,
+    opacity: 0.8,
   },
   content: {
     alignItems: "center",

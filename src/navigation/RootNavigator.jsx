@@ -6,6 +6,7 @@ import { useOnboarding } from "../context/OnboardingContext";
 import AuthStack from "./AuthStack";
 import MainTabs from "./MainTabs";
 import OnboardingStack from "./OnboardingStack"; // NEW
+import LoadingScreen from "../screens/shared/LoadingScreen"; // Ensure LoadingScreen exists
 
 export default function RootNavigator() {
   const { user, isLoading: authLoading } = useAuth();
@@ -18,16 +19,16 @@ export default function RootNavigator() {
 
   // Navigation logic
   if (!user) {
-    // Not authenticated: show onboarding carousel first
+    // Not authenticated: show AuthStack
     return (
       <NavigationContainer>
-        <OnboardingStack />
+        <AuthStack />
       </NavigationContainer>
     );
   }
 
   if (!isOnboardingComplete) {
-    // Authenticated but onboarding incomplete: continue onboarding
+    // Authenticated but onboarding incomplete: show OnboardingStack
     return (
       <NavigationContainer>
         <OnboardingStack />

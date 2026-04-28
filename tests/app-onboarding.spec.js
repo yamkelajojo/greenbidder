@@ -1,0 +1,29 @@
+const { test, expect } = require('@playwright/test');
+
+test.describe('GreenBidder Onboarding E2E Tests', () => {
+  test('@smoke Login screen displays correctly', async ({ page }) => {
+    await page.goto('http://localhost:8081'); // Expo web default port
+    
+    // Check that login screen is visible
+    await expect(page.locator('text=Welcome back')).toBeVisible();
+    await expect(page.locator('text=Login')).toBeVisible();
+    await expect(page.locator('text=Sign up')).toBeVisible();
+  });
+
+  test('@smoke No redbox errors on startup', async ({ page }) => {
+    await page.goto('http://localhost:8081');
+    
+    // Check for any console errors containing "must be rendered within a <Text>"
+    const errors = [];
+    page.on('console', msg => {
+      if (msg.type() === 'error' && msg.text().includes('must be rendered within a <Text>')) {
+        errors.push(msg.text());
+      }
+    });
+    
+    // Wait a bit for potential errors
+    await page.waitForTimeout(2000);
+    
+    expect(errors).toEqual([]);
+  });
+});

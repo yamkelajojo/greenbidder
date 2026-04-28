@@ -18,12 +18,8 @@ export default function App() {
       <TamaguiProvider config={config}>
         <SafeAreaProvider>
           <BottomSheetModalProvider>
-            {" "}
-            {/* NEW: for bottom sheets */}
             <AuthProvider>
               <OnboardingProvider>
-                {" "}
-                {/* NEW: onboarding state */}
                 <FeedbackProvider>
                   <AIModalProvider>
                     <RootNavigator />

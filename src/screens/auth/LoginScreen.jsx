@@ -8,6 +8,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Image,
 } from "react-native";
 import Animated from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -165,16 +166,26 @@ export default function LoginScreen({ navigation }) {
                     disabled={true} // Placeholder
                     onPress={() => {}}
                   >
-                    <Image source={require("../../assets/google.png")} />
-                    <Text>Google</Text>
+                    <Image
+                      source={require("../../../assets/google.png")}
+                      style={styles.socialIcon}
+                    />
+                    <Text style={styles.socialButtonText}>
+                      Google (Coming Soon)
+                    </Text>
                   </TactilePressable>
                   <TactilePressable
                     style={styles.socialButton}
                     disabled={true} // Placeholder
                     onPress={() => {}}
                   >
-                    <Image source={require("../../assets/apple.png")} />
-                    <Text>Apple</Text>
+                    <Image
+                      source={require("../../../assets/apple.png")}
+                      style={styles.socialIcon}
+                    />
+                    <Text style={styles.socialButtonText}>
+                      Apple (Coming Soon)
+                    </Text>
                   </TactilePressable>
                 </View>
               </View>
@@ -244,4 +255,42 @@ const styles = StyleSheet.create({
   },
   linkText: { fontSize: fonts.caption, color: colors.textSecondary },
   linkBold: { color: colors.primary, fontWeight: "600" },
+  socialContainer: {
+    marginTop: spacing.lg,
+    alignItems: "center",
+  },
+  socialLabel: {
+    fontSize: fonts.caption,
+    color: colors.textSecondary,
+    marginBottom: spacing.sm,
+  },
+  socialButtons: {
+    width: "100%",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  socialButton: {
+    flex: 1,
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+    backgroundColor: colors.surface,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    opacity: 0.7,
+  },
+  socialIcon: {
+    width: 18,
+    height: 18,
+    marginBottom: 6,
+    resizeMode: "contain",
+  },
+  socialButtonText: {
+    fontSize: fonts.caption,
+    color: colors.textSecondary,
+    textAlign: "center",
+  },
 });

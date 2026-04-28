@@ -2,11 +2,15 @@
 import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useOnboarding } from "../../context/OnboardingContext";
 
 export default function FarmerPricingGuide({ navigation }) {
+  const { markStepComplete } = useOnboarding();
+
   const handleUnderstand = () => {
-    // Mark as complete and navigate to main app
-    navigation.navigate("MainTabs");
+    // Mark pricing guide as complete
+    // RootNavigator will automatically switch to MainTabs when isOnboardingComplete becomes true
+    markStepComplete("pricingGuide");
   };
 
   return (

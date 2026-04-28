@@ -2,11 +2,15 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useOnboarding } from "../../context/OnboardingContext";
+import { saveBudgetTier } from "../../services/buyerPreferenceStore";
 
 export default function BuyerPriceRangeScreen({ navigation }) {
+  const { priceRange, setPriceRange, completeBuyerOnboardingMock } =
+    useOnboarding();
   const [selectedTier, setSelectedTier] = useState(null);
-  const [priceRange, setPriceRange] = useState({ min: null, max: null });
   const [completed, setCompleted] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   const tiers = [
     {
@@ -37,31 +41,35 @@ export default function BuyerPriceRangeScreen({ navigation }) {
     setPriceRange(tier.range);
   };
 
-  const handleContinue = () => {
-    if (!selectedTier) {
-      Alert.alert("Selection Required", "Please select a budget tier.");
+  const savePriceRange = async (range) => {
+    setPriceRange(range);
+    const tierId = selectedTier || "custom";
+    await saveBudgetTier({ tierId, min: range.min, max: range.max });
+  };
+
+  const handleContinue = async () => {
+    if (!selectedTier || completed || isSaving) {
+      if (!selectedTier) {
+        Alert.alert("Selection Required", "Please select a budget tier.");
+      }
       return;
     }
 
-    // Save to Supabase (best-effort, with offline tolerance)
-    savePriceRange(priceRange)
-      .then(() => {
-        console.log("Price range saved:", priceRange);
-        setCompleted(true);
-        navigation.navigate("MainTabs"); // Navigate after completion
-      })
-      .catch((error) => {
-        console.error("Failed to save price range:", error);
-        // Proceed locally even if sync fails
-        setCompleted(true);
-        navigation.navigate("MainTabs");
-      });
-  };
-
-  const savePriceRange = async (range) => {
-    // Placeholder for Supabase integration
-    console.log("Saving price range to Supabase:", range);
-    // In real implementation: update buyer_profiles columns
+    setIsSaving(true);
+    try {
+      await savePriceRange(priceRange);
+      await completeBuyerOnboardingMock();
+      setCompleted(true);
+      // RootNavigator will automatically switch to MainTabs when isOnboardingComplete becomes true.
+    } catch (error) {
+      console.error("Failed to save price range:", error);
+      Alert.alert(
+        "Unable to Save",
+        "We could not save your budget tier locally. Please try again.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -92,12 +100,17 @@ export default function BuyerPriceRangeScreen({ navigation }) {
       ))}
 
       <TouchableOpacity
-        style={[styles.continueButton, completed && styles.continueButtonDisabled]}
+        style={[
+          styles.continueButton,
+          (completed || isSaving) && styles.continueButtonDisabled,
+        ]}
         onPress={handleContinue}
-        disabled={!selectedTier}
+        disabled={!selectedTier || completed || isSaving}
         activeOpacity={0.8}
       >
-        <Text style={styles.continueButtonText}>Continue to Main App</Text>
+        <Text style={styles.continueButtonText}>
+          {isSaving ? "Saving..." : "Continue to Main App"}
+        </Text>
       </TouchableOpacity>
     </SafeAreaView>
   );

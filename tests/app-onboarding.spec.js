@@ -6,8 +6,11 @@ test.describe('GreenBidder Onboarding E2E Tests', () => {
     
     // Check that login screen is visible
     await expect(page.locator('text=Welcome back')).toBeVisible();
-    await expect(page.locator('text=Login')).toBeVisible();
+    await expect(page.locator('text=Log In')).toBeVisible();
     await expect(page.locator('text=Sign up')).toBeVisible();
+    await expect(page.locator('text=Or continue with')).toBeVisible();
+    await expect(page.locator('text=Google')).toBeVisible();
+    await expect(page.locator('text=Apple')).toBeVisible();
   });
 
   test('@smoke No redbox errors on startup', async ({ page }) => {

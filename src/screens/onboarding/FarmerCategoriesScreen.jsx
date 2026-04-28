@@ -1,67 +1,42 @@
 // src/screens/onboarding/FarmerCategoriesScreen.jsx
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, ActivityIndicator } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useCategorySelection } from "../../hooks/useCategorySelection";
+import { useOnboarding } from "../../context/OnboardingContext";
+import { saveFarmerSpecializations } from "../../services/categoryService";
 
 export default function FarmerCategoriesScreen({ navigation }) {
-  const [categories, setCategories] = useState([]);
-  const [selectedCategories, setSelectedCategories] = useState(new Set());
-  const [completed, setCompleted] = useState(false);
+  const { categories, selectedCategories, toggleCategory, selectionCount, isLoading } = useCategorySelection();
+  const { farmProfile, setFarmProfile, markStepComplete } = useOnboarding();
+  const [isSaving, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    loadCategories();
-  }, []);
-
-  const loadCategories = async () => {
-    try {
-      const data = await getCategories();
-      setCategories(data);
-    } catch (error) {
-      console.error("Failed to load categories:", error);
-      // Fallback categories for offline scenarios
-      setCategories([
-        { id: "1", name: "Tomatoes", emoji: "🍅" },
-        { id: "2", name: "Potatoes", emoji: "🥔" },
-        { id: "3", name: "Cabbage", emoji: "🥬" },
-      ]);
-    }
-  };
-
-  const toggleCategory = (categoryId) => {
-    const newSelection = new Set(selectedCategories);
-    if (newSelection.has(categoryId)) {
-      newSelection.delete(categoryId);
-    } else {
-      newSelection.add(categoryId);
-    }
-    setSelectedCategories(newSelection);
-  };
-
-  const handleContinue = () => {
-    if (selectedCategories.size === 0) {
+  const handleContinue = async () => {
+    if (selectionCount === 0) {
       Alert.alert("Selection Required", "Please select at least one category.");
       return;
     }
 
-    // Save to Supabase (best-effort, with offline tolerance)
-    saveCategories(selectedCategories)
-      .then(() => {
-        console.log("Farmer categories saved");
-        setCompleted(true);
-        navigation.navigate("FarmerPricingGuide");
-      })
-      .catch((error) => {
-        console.error("Failed to save categories:", error);
-        // Proceed locally even if sync fails
-        setCompleted(true);
-        navigation.navigate("FarmerPricingGuide");
-      });
-  };
+    setIsSaving(true);
+    const categoryIds = Array.from(selectedCategories);
 
-  const saveCategories = async (categorySet) => {
-    // Placeholder for Supabase integration
-    console.log("Saving farmer categories to Supabase:", Array.from(categorySet));
-    // In real implementation: upsert to farmer_specializations join table
+    setFarmProfile({
+      ...farmProfile,
+      specializations: categoryIds,
+    });
+
+    if (farmProfile.id) {
+      const { error } = await saveFarmerSpecializations(farmProfile.id, categoryIds);
+      if (error) {
+        const pendingData = JSON.stringify({ farmerProfileId: farmProfile.id, categoryIds });
+        await AsyncStorage.setItem("pending_specializations", pendingData);
+      }
+    }
+
+    setIsSaving(false);
+    markStepComplete('farmerCategories');
+    navigation.navigate("FarmerPricingGuide");
   };
 
   const renderItem = ({ item }) => (
@@ -77,6 +52,14 @@ export default function FarmerCategoriesScreen({ navigation }) {
       <Text style={styles.categoryName}>{item.name}</Text>
     </TouchableOpacity>
   );
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <ActivityIndicator size="large" color="#4CAF50" />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -94,12 +77,16 @@ export default function FarmerCategoriesScreen({ navigation }) {
       />
       
       <TouchableOpacity
-        style={[styles.continueButton, completed && styles.continueButtonDisabled]}
+        style={[styles.continueButton, (selectionCount === 0 || isSaving) && styles.continueButtonDisabled]}
         onPress={handleContinue}
-        disabled={completed}
         activeOpacity={0.8}
+        disabled={isSaving}
       >
-        <Text style={styles.continueButtonText}>Continue to Pricing Guide</Text>
+        {isSaving ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <Text style={styles.continueButtonText}>Continue to Pricing Guide</Text>
+        )}
       </TouchableOpacity>
     </SafeAreaView>
   );

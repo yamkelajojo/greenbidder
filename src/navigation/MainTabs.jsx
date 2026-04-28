@@ -84,8 +84,12 @@ export default function MainTabs() {
   const { userRole } = useAuth();
   const isFarmer = userRole === "farmer";
 
+  // Farmers should see Listings tab first after onboarding
+  const initialRoute = isFarmer ? "Listings" : "Feed";
+
   return (
     <Tab.Navigator
+      initialRouteName={initialRoute}
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: colors.primary,

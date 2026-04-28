@@ -24,25 +24,26 @@ const Stack = createNativeStackNavigator();
 
 export default function OnboardingStack() {
   const { userRole } = useAuth();
-  const { completedSteps, userOnboardingProgress } = useOnboarding();
+  const { completedSteps } = useOnboarding();
   const isFarmer = userRole === "farmer";
 
   // Determine initial route based on role and completed steps
   const getInitialRoute = () => {
-    // Check completed steps to determine resumable position
+    const has = (step) => completedSteps.includes(step);
+
+    // First-incomplete routing prevents deadlocks and supports resume after restart.
+    if (!has("welcome")) return "WelcomeCarousel";
+    if (!has("location")) return "LocationPermission";
+
     if (isFarmer) {
-      if (completedSteps.includes("farmerCategories")) {
-        return "FarmerPricingGuide";
-      }
-      if (completedSteps.includes("farmerProfile")) {
-        return "FarmerCategories";
-      }
+      if (!has("farmProfile")) return "FarmerProfile";
+      if (!has("farmerCategories")) return "FarmerCategories";
+      if (!has("pricingGuide")) return "FarmerPricingGuide";
       return "FarmerProfile";
     } else {
-      if (completedSteps.includes("buyerPreferences")) {
-        return "BuyerPriceRange";
-      }
-      return "BuyerPreferences";
+      if (!has("buyerPreferences")) return "BuyerPreferences";
+      if (!has("priceRange")) return "BuyerPriceRange";
+      return "BuyerPriceRange";
     }
   };
 

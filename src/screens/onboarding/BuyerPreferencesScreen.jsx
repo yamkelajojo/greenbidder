@@ -1,69 +1,57 @@
 // src/screens/onboarding/BuyerPreferencesScreen.jsx
-import React, { useState, useEffect } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert } from "react-native";
+import React, { useEffect } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  Alert,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { getCategories } from "../../services/categoryService";
+import { useCategorySelection } from "../../hooks/useCategorySelection";
+import { useOnboarding } from "../../context/OnboardingContext";
+import { saveBuyerPreferences } from "../../services/categoryService";
+import { useAuth } from "../../hooks/useAuth";
 
 export default function BuyerPreferencesScreen({ navigation }) {
-  const [categories, setCategories] = useState([]);
-  const [selectedCategories, setSelectedCategories] = useState(new Set());
-  const [completed, setCompleted] = useState(false);
+  const { profileId } = useAuth();
+  const {
+    categories,
+    selectedCategories,
+    toggleCategory,
+    selectionCount,
+    isLoading,
+  } = useCategorySelection();
+
+  const { selectedCategories: contextCategories, setSelectedCategories, markStepComplete } = useOnboarding();
+
+  const [completed, setCompleted] = React.useState(false);
 
   useEffect(() => {
-    loadCategories();
+    if (contextCategories && contextCategories.length > 0) {
+      contextCategories.forEach((cat) => {
+        toggleCategory(cat.id);
+      });
+    }
   }, []);
 
-  const loadCategories = async () => {
-    try {
-      const data = await getCategories();
-      setCategories(data);
-    } catch (error) {
-      console.error("Failed to load categories:", error);
-      // Fallback categories for offline scenarios
-      setCategories([
-        { id: "1", name: "Fruits", emoji: "🍎" },
-        { id: "2", name: "Vegetables", emoji: "🥕" },
-        { id: "3", name: "Grains", emoji: "🌾" },
-      ]);
-    }
-  };
-
-  const toggleCategory = (categoryId) => {
-    const newSelection = new Set(selectedCategories);
-    if (newSelection.has(categoryId)) {
-      newSelection.delete(categoryId);
-    } else {
-      newSelection.add(categoryId);
-    }
-    setSelectedCategories(newSelection);
-  };
-
-  const handleContinue = () => {
-    if (selectedCategories.size === 0) { // No fix for `selectedCategories.length` for Set
+  const handleContinue = async () => {
+    if (selectionCount === 0) {
       Alert.alert("Selection Required", "Please select at least one category.");
       return;
     }
 
-    // Save to Supabase (best-effort, with offline tolerance)
-    saveCategories(selectedCategories)
-      .then(() => {
-        console.log("Buyer preferences saved");
-        setCompleted(true);
-        // Navigate to next screen
-        navigation.navigate("BuyerPriceRange");
-      })
-      .catch((error) => {
-        console.error("Failed to save preferences:", error);
-        // Proceed locally even if sync fails
-        setCompleted(true);
-        navigation.navigate("BuyerPriceRange");
-      });
-  };
+    const categoryIds = Array.from(selectedCategories);
+    setSelectedCategories(categoryIds);
 
-  const saveCategories = async (categorySet) => {
-    // Placeholder for Supabase integration
-    console.log("Saving categories to Supabase:", Array.from(categorySet));
-    // In real implementation: upsert to buyer_preferred_categories join table
+    if (profileId) {
+      await saveBuyerPreferences(profileId, categoryIds);
+    }
+
+    markStepComplete("buyerPreferences");
+    setCompleted(true);
+    navigation.navigate("BuyerPriceRange");
   };
 
   const renderItem = ({ item }) => (
@@ -83,8 +71,10 @@ export default function BuyerPreferencesScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.title}>What are you interested in?</Text>
-      <Text style={styles.subtitle}>Select your preferred produce categories</Text>
-      
+      <Text style={styles.subtitle}>
+        Select your preferred produce categories
+      </Text>
+
       <FlatList
         data={categories}
         renderItem={renderItem}
@@ -94,9 +84,12 @@ export default function BuyerPreferencesScreen({ navigation }) {
         initialNumToRender={6}
         windowSize={5}
       />
-      
+
       <TouchableOpacity
-        style={[styles.continueButton, completed && styles.continueButtonDisabled]}
+        style={[
+          styles.continueButton,
+          completed && styles.continueButtonDisabled,
+        ]}
         onPress={handleContinue}
         disabled={completed}
         activeOpacity={0.8}

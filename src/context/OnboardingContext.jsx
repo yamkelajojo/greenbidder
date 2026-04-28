@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../hooks/useAuth";
+import { getBudgetTier } from "../services/buyerPreferenceStore";
 
 // Async storage wrapper for Expo Go compatibility
 export const onboardingStorage = {
@@ -73,18 +74,22 @@ export const OnboardingProvider = ({ children }) => {
   useEffect(() => {
     const loadPersistedState = async () => {
       try {
-        const [grantedLocation, buyerTutorial, farmerGuide, steps] =
+        const [grantedLocation, buyerTutorial, farmerGuide, steps, budgetTier] =
           await Promise.all([
             onboardingStorage.getBoolean("hasGrantedLocation"),
             onboardingStorage.getBoolean("hasSeenBuyerTutorial"),
             onboardingStorage.getBoolean("hasSeenFarmerGuide"),
             onboardingStorage.getString("completedSteps"),
+            getBudgetTier(),
           ]);
 
         setHasGrantedLocation(grantedLocation || false);
         setHasSeenBuyerTutorial(buyerTutorial || false);
         setHasSeenFarmerGuide(farmerGuide || false);
         setCompletedSteps(steps ? JSON.parse(steps) : []);
+        if (budgetTier) {
+          setPriceRange({ min: budgetTier.min, max: budgetTier.max });
+        }
       } catch (error) {
         console.warn("Failed to load onboarding state:", error);
       } finally {
@@ -97,11 +102,24 @@ export const OnboardingProvider = ({ children }) => {
 
   // ── HELPERS ──────────────────────────────────────────────────
   const markStepComplete = async (stepName) => {
-    if (!completedSteps.includes(stepName)) {
-      const updated = [...completedSteps, stepName];
-      setCompletedSteps(updated);
-      await onboardingStorage.set("completedSteps", JSON.stringify(updated));
-    }
+    if (completedSteps.includes(stepName)) return;
+
+    const updated = [...completedSteps, stepName];
+    setCompletedSteps(updated);
+    await onboardingStorage.set("completedSteps", JSON.stringify(updated));
+  };
+
+  // Temporary buyer shortcut to prevent onboarding deadlock while flow is being stabilized.
+  const completeBuyerOnboardingMock = async () => {
+    const buyerRequiredSteps = [
+      "welcome",
+      "location",
+      "buyerPreferences",
+      "priceRange",
+    ];
+    const updated = Array.from(new Set([...completedSteps, ...buyerRequiredSteps]));
+    setCompletedSteps(updated);
+    await onboardingStorage.set("completedSteps", JSON.stringify(updated));
   };
 
   const isStepComplete = (stepName) => completedSteps.includes(stepName);
@@ -185,6 +203,7 @@ export const OnboardingProvider = ({ children }) => {
       // Completion
       completedSteps,
       markStepComplete,
+      completeBuyerOnboardingMock,
       isStepComplete,
       isOnboardingComplete,
       resetOnboarding,

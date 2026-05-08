@@ -43,6 +43,18 @@ export const haptic = {
   },
 
   /**
+   * Legacy alias kept for compatibility with existing call sites.
+   * Behaves exactly like tap().
+   */
+  light: () => {
+    Haptics.impactAsync(
+      isIOS
+        ? Haptics.ImpactFeedbackStyle.Light
+        : Haptics.ImpactFeedbackStyle.Medium
+    );
+  },
+
+  /**
    * Medium — for committing actions. Submitting a form, selecting a role,
    * confirming a choice. The user made a decision.
    */

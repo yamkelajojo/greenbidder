@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   Keyboard,
 } from "react-native";
+import Animated, { FadeInDown, FadeOutUp } from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "../../hooks/useAuth";
 import { supabase } from "../../config/supabase";
@@ -22,6 +23,7 @@ import { CATEGORY_ICONS } from "../../services/marketPriceService";
 import { formatZAR } from "../../utils/formatters";
 import { timeAgo } from "../../utils/dateUtils";
 import { colors, spacing, fonts, radius } from "../../config/theme";
+import { haptic } from "../../utils/haptics";
 
 /**
  * SearchScreen — intelligent produce discovery.
@@ -241,6 +243,7 @@ export default function SearchScreen({ navigation }) {
    * Handles tapping a recent search — re-executes it.
    */
   const handleRecentTap = (searchText) => {
+    haptic.selection();
     setQuery(searchText);
     performSearch(searchText);
   };
@@ -249,6 +252,7 @@ export default function SearchScreen({ navigation }) {
    * Handles tapping a category — searches by category name.
    */
   const handleCategoryTap = (categoryName) => {
+    haptic.selection();
     setQuery(categoryName);
     performSearch(categoryName);
   };
@@ -263,7 +267,7 @@ export default function SearchScreen({ navigation }) {
   const isIdle = query.trim().length === 0 && results.length === 0;
 
   // ── Result Card ──────────────────────────────────────────────
-  const renderResult = ({ item }) => {
+  const renderResult = ({ item, index }) => {
     const primaryImage = item.listing_images?.find((img) => img.is_primary);
     const imageUrl =
       primaryImage?.image_url || item.listing_images?.[0]?.image_url;
@@ -271,11 +275,16 @@ export default function SearchScreen({ navigation }) {
     const icon = CATEGORY_ICONS[item.produce_categories?.name] || "🌿";
 
     return (
+      <Animated.View
+        entering={FadeInDown.delay(index * 40).duration(320)}
+        exiting={FadeOutUp.duration(200)}
+      >
       <TouchableOpacity
         style={styles.resultCard}
-        onPress={() =>
-          navigation.navigate("ListingDetail", { listingId: item.id })
-        }
+        onPress={() => {
+          haptic.tap();
+          navigation.navigate("ListingDetail", { listingId: item.id });
+        }}
         activeOpacity={0.8}
       >
         {imageUrl ? (
@@ -311,6 +320,7 @@ export default function SearchScreen({ navigation }) {
           </View>
         ) : null}
       </TouchableOpacity>
+      </Animated.View>
     );
   };
 

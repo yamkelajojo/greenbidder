@@ -71,8 +71,9 @@ export default function EditListingScreen({ route, navigation }) {
   };
 
   const handlePickImage = async () => {
-    const result = await pickImage("gallery");
+    const result = await pickImage("camera", "camera_only");
     if (result.uri) setImageUri(result.uri);
+    if (result.error) Alert.alert("Camera Required", result.error);
   };
 
   const handleSave = async () => {

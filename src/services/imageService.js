@@ -11,9 +11,14 @@ import * as FileSystem from "expo-file-system";
 /**
  * Opens the device image picker (gallery or camera).
  * @param {"gallery"|"camera"} [source="gallery"] - Where to pick from
+ * @param {"default"|"camera_only"} [policy="default"] - Capture policy
  * @returns {Promise<{uri: string, cancelled: boolean}|null>}
  */
-export const pickImage = async (source = "gallery") => {
+export const pickImage = async (source = "gallery", policy = "default") => {
+  if (policy === "camera_only") {
+    source = "camera";
+  }
+
   // Request permission
   if (source === "camera") {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
@@ -21,6 +26,13 @@ export const pickImage = async (source = "gallery") => {
       return { uri: null, cancelled: true, error: "Camera permission denied" };
     }
   } else {
+    if (policy === "camera_only") {
+      return {
+        uri: null,
+        cancelled: true,
+        error: "Gallery is disabled for listings. Please use the camera.",
+      };
+    }
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       return { uri: null, cancelled: true, error: "Gallery permission denied" };

@@ -340,6 +340,7 @@ export default function ProfileScreen() {
     return (
       <SafeAreaView style={styles.safe}>
         <View style={styles.loader}>
+          <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loaderText}>Loading profile...</Text>
         </View>
       </SafeAreaView>
@@ -628,7 +629,11 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: { paddingHorizontal: spacing.lg, paddingTop: spacing.lg },
   loader: { flex: 1, justifyContent: "center", alignItems: "center" },
-  loaderText: { fontSize: fonts.caption, color: colors.textSecondary },
+  loaderText: {
+    marginTop: spacing.sm,
+    fontSize: fonts.caption,
+    color: colors.textSecondary,
+  },
 
   headerAccent: {
     position: "absolute",

@@ -3,6 +3,7 @@
 ## Ticket Queue
 
 1. Deterministic Bug Harness for Auth/Onboarding
+
 - Type: AFK
 - State: Done
 - Blocked by: None
@@ -14,6 +15,7 @@
 - `tests/app-onboarding.spec.js` asserts `"Or continue with"`, `"Google"`, and `"Apple"` are visible.
 
 2. Buyer Budget Preference Local Deep Module
+
 - Type: AFK
 - State: Done
 - Blocked by: #1
@@ -25,6 +27,7 @@
 - `OnboardingContext` loads persisted budget tier into `priceRange`.
 
 3. Onboarding Continue Flow Never Blocks
+
 - Type: AFK
 - State: Done
 - Blocked by: #2
@@ -40,6 +43,7 @@
 - `OnboardingStack` now resumes from the first incomplete step, preventing route deadlocks.
 
 4. Login Social Buttons Visibility + Disabled UX
+
 - Type: AFK
 - State: Done
 - Blocked by: #1
@@ -51,6 +55,7 @@
 - Added disabled labels (`Google (Coming Soon)`, `Apple (Coming Soon)`).
 
 5. PRD + Issue Mirror + Dependency Map Sync
+
 - Type: HITL
 - State: Blocked
 - Blocked by: #3, #4

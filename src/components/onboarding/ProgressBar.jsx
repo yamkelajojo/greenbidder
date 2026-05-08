@@ -1,77 +1,67 @@
-// src/components/onboarding/ProgressBar.jsx
 import React from "react";
 import { View, StyleSheet } from "react-native";
 import Animated, {
   useAnimatedStyle,
-  withTiming,
+  withSpring,
+  interpolate,
+  Extrapolate,
 } from "react-native-reanimated";
-import { colors, radius } from "../../config/theme";
+import { colors, radius, springs } from "../../config/theme";
 
 export default function ProgressBar({
   current,
   total,
   accentColor = colors.primary,
+  motionState,
 }) {
-  // Calculate width percentage
   const progress = (current / total) * 100;
+  const activeIndex = motionState?.activeIndex;
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    width: withTiming(`${progress}%`, { duration: 300 }),
+  const fillStyle = useAnimatedStyle(() => ({
+    width: withSpring(`${progress}%`, springs.gentle),
   }));
 
   return (
     <View style={styles.container}>
-      {/* Track */}
       <View style={styles.track} />
+      <Animated.View style={[styles.fill, fillStyle, { backgroundColor: accentColor }]} />
 
-      {/* Progress fill */}
-      <Animated.View
-        style={[styles.fill, animatedStyle, { backgroundColor: accentColor }]}
-      />
-
-      {/* Dots indicator */}
       <View style={styles.dots}>
-        {Array.from({ length: total }).map((_, index) => (
-          <View
-            key={index}
-            style={[
-              styles.dot,
-              index < current
-                ? { backgroundColor: accentColor, width: 12 }
-                : { backgroundColor: colors.border },
-            ]}
-          />
-        ))}
+        {Array.from({ length: total }).map((_, index) => {
+          const dotStyle = useAnimatedStyle(() => {
+            const active = activeIndex ? activeIndex.value : current - 1;
+            const delta = Math.abs(active - index);
+            return {
+              width: withSpring(interpolate(delta, [0, 1], [14, 6], Extrapolate.CLAMP), springs.gentle),
+              opacity: withSpring(interpolate(delta, [0, 1], [1, 0.5], Extrapolate.CLAMP), springs.gentle),
+            };
+          });
+
+          const isPassed = index < current;
+          return (
+            <Animated.View
+              key={index}
+              style={[
+                styles.dot,
+                dotStyle,
+                { backgroundColor: isPassed ? accentColor : colors.border },
+              ]}
+            />
+          );
+        })}
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    width: "100%",
-    height: 4,
-    marginBottom: 20,
-  },
+  container: { width: "100%", height: 4, marginBottom: 20 },
   track: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.border,
     borderRadius: radius.full,
   },
-  fill: {
-    position: "absolute",
-    height: "100%",
-    borderRadius: radius.full,
-  },
-  dots: {
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 6,
-    marginTop: 12,
-  },
-  dot: {
-    height: 6,
-    borderRadius: radius.full,
-    transition: "width 0.2s",
-  },
+  fill: { position: "absolute", height: "100%", borderRadius: radius.full },
+  dots: { flexDirection: "row", justifyContent: "center", gap: 6, marginTop: 12 },
+  dot: { height: 6, borderRadius: radius.full },
 });

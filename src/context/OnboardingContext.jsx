@@ -10,6 +10,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useAuth } from "../hooks/useAuth";
 import { getBudgetTier } from "../services/buyerPreferenceStore";
 
+const REPLAY_ONBOARDING_EVERY_LAUNCH = true;
+
 // Async storage wrapper for Expo Go compatibility
 export const onboardingStorage = {
   getBoolean: async (key) => {
@@ -86,7 +88,9 @@ export const OnboardingProvider = ({ children }) => {
         setHasGrantedLocation(grantedLocation || false);
         setHasSeenBuyerTutorial(buyerTutorial || false);
         setHasSeenFarmerGuide(farmerGuide || false);
-        setCompletedSteps(steps ? JSON.parse(steps) : []);
+        setCompletedSteps(
+          REPLAY_ONBOARDING_EVERY_LAUNCH ? [] : steps ? JSON.parse(steps) : [],
+        );
         if (budgetTier) {
           setPriceRange({ min: budgetTier.min, max: budgetTier.max });
         }
@@ -106,7 +110,9 @@ export const OnboardingProvider = ({ children }) => {
 
     const updated = [...completedSteps, stepName];
     setCompletedSteps(updated);
-    await onboardingStorage.set("completedSteps", JSON.stringify(updated));
+    if (!REPLAY_ONBOARDING_EVERY_LAUNCH) {
+      await onboardingStorage.set("completedSteps", JSON.stringify(updated));
+    }
   };
 
   // Temporary buyer shortcut to prevent onboarding deadlock while flow is being stabilized.
@@ -119,7 +125,9 @@ export const OnboardingProvider = ({ children }) => {
     ];
     const updated = Array.from(new Set([...completedSteps, ...buyerRequiredSteps]));
     setCompletedSteps(updated);
-    await onboardingStorage.set("completedSteps", JSON.stringify(updated));
+    if (!REPLAY_ONBOARDING_EVERY_LAUNCH) {
+      await onboardingStorage.set("completedSteps", JSON.stringify(updated));
+    }
   };
 
   const isStepComplete = (stepName) => completedSteps.includes(stepName);

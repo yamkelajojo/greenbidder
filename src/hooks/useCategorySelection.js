@@ -1,18 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { getCategories, FALLBACK_CATEGORIES } from "../services/categoryService";
+import { CATEGORY_ICONS } from "../services/marketPriceService";
 
-const CATEGORY_EMOJI_MAP = {
-  Fruits: "🍎",
-  Vegetables: "🥕",
-  Grains: "🌾",
-  Dairy: "🥛",
-  Herbs: "🌿",
-  Nuts: "🥜",
-  Flowers: "💐",
-  Meat: "🥩",
-  Eggs: "🥚",
-  Honey: "🍯",
-};
+const DEFAULT_CATEGORY_ICON = "🌱";
 
 export function useCategorySelection() {
   const [categories, setCategories] = useState([]);
@@ -20,23 +10,23 @@ export function useCategorySelection() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const withIcons = (rows) =>
+    (rows || []).map((cat) => ({
+      ...cat,
+      icon: CATEGORY_ICONS[cat.name] || DEFAULT_CATEGORY_ICON,
+    }));
+
   const loadCategories = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       const { data, error: fetchError } = await getCategories();
       if (fetchError) throw fetchError;
-      
-      const categoriesWithEmoji = (data || []).map((cat) => ({
-        ...cat,
-        emoji: CATEGORY_EMOJI_MAP[cat.name] || "🌱",
-      }));
-      
-      setCategories(categoriesWithEmoji);
+      setCategories(withIcons(data));
     } catch (err) {
       console.error("Failed to load categories:", err);
       setError(err.message || "Failed to load categories");
-      setCategories(FALLBACK_CATEGORIES);
+      setCategories(withIcons(FALLBACK_CATEGORIES));
     } finally {
       setIsLoading(false);
     }
@@ -44,13 +34,10 @@ export function useCategorySelection() {
 
   const toggleCategory = useCallback((categoryId) => {
     setSelectedCategories((prev) => {
-      const newSelection = new Set(prev);
-      if (newSelection.has(categoryId)) {
-        newSelection.delete(categoryId);
-      } else {
-        newSelection.add(categoryId);
-      }
-      return newSelection;
+      const next = new Set(prev);
+      if (next.has(categoryId)) next.delete(categoryId);
+      else next.add(categoryId);
+      return next;
     });
   }, []);
 

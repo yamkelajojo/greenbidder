@@ -7,6 +7,11 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
+import Animated, {
+  FadeInDown,
+  FadeOutUp,
+  LinearTransition,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "@react-navigation/native";
 import {
@@ -152,7 +157,7 @@ export default function MarketPricesScreen() {
   };
 
   // ── Category Price Card ──────────────────────────────────────
-  const renderPriceCard = ({ item }) => {
+  const renderPriceCard = ({ item, index }) => {
     const hasListing = item.listing !== null;
     const trendColor =
       item.trend === "up"
@@ -169,6 +174,11 @@ export default function MarketPricesScreen() {
       : 50;
 
     return (
+      <Animated.View
+        entering={FadeInDown.delay(index * 45).duration(340)}
+        exiting={FadeOutUp.duration(220)}
+        layout={LinearTransition.springify().damping(20).stiffness(220)}
+      >
       <View style={styles.card}>
         {/* Card header: emoji + name + trend */}
         <View style={styles.cardHeader}>
@@ -267,6 +277,7 @@ export default function MarketPricesScreen() {
           </View>
         ) : null}
       </View>
+      </Animated.View>
     );
   };
 

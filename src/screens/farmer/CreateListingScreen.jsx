@@ -57,7 +57,7 @@ export default function CreateListingScreen({ navigation }) {
   const [unit, setUnit] = useState("kg");
   const [categoryId, setCategoryId] = useState(null);
   const [imageUri, setImageUri] = useState(null);
-  // const [isOrganic, setIsOrganic] = useState(false); // NEW v3 — feeds AI + DB
+  const [isOrganic, setIsOrganic] = useState(false);
 
   // Data state
   const [categories, setCategories] = useState([]);
@@ -129,7 +129,7 @@ export default function CreateListingScreen({ navigation }) {
   };
 
   const handlePickImage = async () => {
-    const result = await pickImage("camera");
+    const result = await pickImage("camera", "camera_only");
     if (result.uri) setImageUri(result.uri);
     if (result.error) Alert.alert("Error", result.error);
   };

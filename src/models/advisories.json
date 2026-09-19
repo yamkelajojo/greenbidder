@@ -1,0 +1,65 @@
+{
+  "alternaria_leaf_spot": {
+    "label": "Alternaria Leaf Spot",
+    "severity": "moderate",
+    "summary": "A fungal disease causing dark, target-like spots on leaves.",
+    "symptoms": "Brown-to-black concentric rings, often with a yellow halo. Spots enlarge and merge.",
+    "action": "Remove affected leaves. Apply a copper-based or chlorothalonil fungicide. Improve airflow between plants."
+  },
+  "bacterial_leaf_spot": {
+    "label": "Bacterial Leaf Spot",
+    "severity": "moderate",
+    "summary": "A bacterial infection producing water-soaked lesions.",
+    "symptoms": "Small dark spots that turn angular and necrotic; often a yellow halo.",
+    "action": "Remove infected leaves. Avoid overhead watering. Apply copper-based bactericide. Rotate crops next season."
+  },
+  "black_rot": {
+    "label": "Black Rot",
+    "severity": "severe",
+    "summary": "A serious bacterial disease that can destroy a crop.",
+    "symptoms": "Yellow V-shaped lesions at leaf edges, blackened veins, wilting.",
+    "action": "Remove and destroy infected plants immediately. Do not compost. Practice 2\u20133 year crop rotation. Use certified disease-free seed."
+  },
+  "clubroot": {
+    "label": "Clubroot",
+    "severity": "severe",
+    "summary": "A soil-borne disease affecting the roots.",
+    "symptoms": "Stunted growth, wilting in heat, swollen distorted roots.",
+    "action": "Remove infected plants including roots. Lime soil to raise pH to 7+. Do not replant brassicas in the same bed for 3\u20135 years."
+  },
+  "downy_mildew": {
+    "label": "Downy Mildew",
+    "severity": "moderate",
+    "summary": "A fungal-like disease favored by cool, damp conditions.",
+    "symptoms": "Pale-yellow patches on the upper leaf surface, grey-white fuzzy growth underneath.",
+    "action": "Improve ventilation. Remove affected leaves. Apply a downy-mildew-specific fungicide. Avoid evening watering."
+  },
+  "grey_mould": {
+    "label": "Grey Mould",
+    "severity": "moderate",
+    "summary": "A fungal disease that thrives in humid, crowded conditions.",
+    "symptoms": "Fuzzy grey-brown growth on damaged or dying tissue.",
+    "action": "Remove affected plant parts. Increase spacing and airflow. Avoid excess nitrogen. Apply a suitable fungicide if severe."
+  },
+  "healthy": {
+    "label": "Healthy",
+    "severity": "healthy",
+    "summary": "No disease detected.",
+    "symptoms": "Leaves are firm, uniformly colored, with no lesions or discoloration.",
+    "action": "Continue current care. Monitor regularly for early signs."
+  },
+  "ringspot": {
+    "label": "Ringspot",
+    "severity": "moderate",
+    "summary": "A viral or fungal disease producing ring-shaped lesions.",
+    "symptoms": "Circular rings or concentric patterns on leaves; may distort growth.",
+    "action": "Remove affected leaves. Control aphids and other vectors. Remove severely affected plants. Do not save seed from infected plants."
+  },
+  "unknown": {
+    "label": "Unable to Diagnose",
+    "severity": "unknown",
+    "summary": "The image did not match a known cabbage disease with sufficient confidence.",
+    "symptoms": "\u2014",
+    "action": "Retake the photo in good light, filling the frame with a single leaf. Avoid blur and shadows."
+  }
+}

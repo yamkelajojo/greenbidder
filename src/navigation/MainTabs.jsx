@@ -1,7 +1,13 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { Home, BarChart3, PlusCircle, User } from "@tamagui/lucide-icons-2";
+import {
+  Home,
+  BarChart3,
+  PlusCircle,
+  User,
+  Stethoscope,
+} from "@tamagui/lucide-icons-2";
 import { useAuth } from "../hooks/useAuth";
 
 // Buyer screens
@@ -17,11 +23,15 @@ import EditListingScreen from "../screens/farmer/EditListingScreen";
 import MarketPricesScreen from "../screens/shared/MarketPricesScreen";
 import ProfileScreen from "../screens/shared/ProfileScreen";
 
+// Disease detection screens
+import DiseaseScanScreen from "../screens/disease/DiseaseScanScreen";
+
 const Tab = createBottomTabNavigator();
 const FeedStack = createNativeStackNavigator();
 const ListingsStack = createNativeStackNavigator();
 const PricesStack = createNativeStackNavigator();
 const ProfileStack = createNativeStackNavigator();
+const DiagnoseStack = createNativeStackNavigator();
 
 /** Buyer: Feed → Listing Detail */
 function FeedStackScreen() {
@@ -72,6 +82,15 @@ function ProfileStackScreen() {
   );
 }
 
+/** Disease detection (standalone feature — does not touch valuation flows) */
+function DiagnoseStackScreen() {
+  return (
+    <DiagnoseStack.Navigator screenOptions={{ headerShown: false }}>
+      <DiagnoseStack.Screen name="DiagnoseHome" component={DiseaseScanScreen} />
+    </DiagnoseStack.Navigator>
+  );
+}
+
 /**
  * Main tab bar — 4 tabs.
  * Tab 1 and Tab 3 are role-aware:
@@ -115,6 +134,16 @@ export default function MainTabs() {
             <BarChart3 color={color} size={size} />
           ),
           tabBarLabel: "Prices",
+        }}
+      />
+      <Tab.Screen
+        name="Diagnose"
+        component={DiagnoseStackScreen}
+        options={{
+          tabBarIcon: ({ color, size }) => (
+            <Stethoscope color={color} size={size} />
+          ),
+          tabBarLabel: "Diagnose",
         }}
       />
       <Tab.Screen

@@ -24,8 +24,8 @@ Legend: ✅ done · 🚧 in progress · ⛔ blocked (external input needed) · �
 | 11 | Bottom tab (§8.3) | ✅ | 5th tab "Diagnose" (Stethoscope icon) inserted between Prices and Listings; existing tabs unchanged |
 | 12 | `advisories.json` (§9) | ✅ | Verbatim text, + severity for color coding |
 | 13 | Stage-1 not-a-cabbage (§10) | ✅ | 0.70 confidence floor + 0.10 top-2 margin in `src/utils/diseaseLogic.js`; pure + node-tested |
-| 14 | **MVP milestone on Android** | ⛔ | Needs: (a) real model artifact (task 4–6), (b) Supabase migration run (task 7), (c) prebuild + Android device or lightweight AVD, (d) real cabbage photos across ≥3 disease classes + healthy |
-| 15 | EAS Build (dev profile, Android) + release test | 🚧 | `eas.json` added (development/preview/production). Builds run on the user's machine (EAS cloud) — commands in "Build runbook" |
+| 14 | **MVP milestone on Android** | ⛔ | Path agreed (2026-09-19): **lightweight AVD** (2 GB, no Play — see `AVD_SETUP.md`). Needs: (a) real model artifacts from the user's Colab run, (b) Supabase migration run, (c) EAS development build → AVD, (d) real cabbage photos across ≥3 disease classes + healthy |
+| 15 | EAS Build (dev profile, Android) + release test | 🚧 | `eas.json` added (development/preview/production). Full EAS + AVD runbook in `AVD_SETUP.md` |
 | 16 | Stage-2 cabbage gate | ⏳ | Deferred per PRD until MVP validated. Hook point documented in `diseaseService.diagnose` |
 | 17 | Re-validate end-to-end, mark complete | ⏳ | After 14 + 15 |
 
@@ -87,10 +87,24 @@ Notes:
 - Placeholder TFLite verified: input [1,384,384,3] f32 → output [1,8] f32,
   1.6 KB, random-init (outputs near-uniform → always "unknown" if ever run)
 
-## Open questions for the user (blocking the model milestone)
+## Decisions (2026-09-19, with user)
 
-1. **Where is `final.keras`?** Hugging Face repo URL, or upload the file.
-   (No public "CabbageGuard" repo is findable from this sandbox.)
-2. **Class order** — from the training notebook/model card, if not shipped
-   in a `class_names.json` sidecar.
-3. **Android device** available for the MVP milestone, or emulator?
+1. **Model source:** user runs `docs/cabbage-feature/colab/cabbageguard-to-tflite.ipynb`
+   in Colab (uploads `final.keras` there), then copies the 3 deliverables into
+   `src/models/`. If the pipeline STOPS (class order / preprocessing), the
+   STOP message says exactly what to provide.
+2. **Test target:** lightweight Android AVD (2 GB RAM, no Play, Pixel 5
+   profile) on the 8 GB Windows machine — all builds via EAS cloud (no local
+   Gradle). Full runbook: `AVD_SETUP.md`. Latency target (~2 s) is emulated-CPU
+   biased on the AVD; correctness is what the AVD validates.
+
+## Open items (for the user, in order)
+
+1. Run the migration: `database/migrations/002_disease_scans.sql` in the
+   Supabase SQL editor.
+2. Run the Colab notebook; watch for STOP messages; download
+   `cabbageguard.tflite`, `labels.json`, `MODEL_NOTES.md`.
+3. Copy the two model files into `src/models/` (overwrite placeholders),
+   `MODEL_NOTES.md` to `docs/cabbage-feature/`, commit.
+4. Follow `AVD_SETUP.md` §3–§6 (EAS dev build → AVD → test → EAS release
+   build → test).

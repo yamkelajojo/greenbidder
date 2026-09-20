@@ -237,11 +237,20 @@ export default function DiseaseScanScreen() {
   // Header section (above the history list)
   // ------------------------------------------------------------------
   const renderTop = () => {
+    if (Platform.OS === "web") {
+      return (
+        <>
+          <Header />
+          <WebOnlyCard />
+        </>
+      );
+    }
+
     if (!modelReady) {
       return (
         <>
           <Header />
-          {Platform.OS === "web" ? <WebOnlyCard /> : <ModelNotReadyCard />}
+          <ModelNotReadyCard />
         </>
       );
     }

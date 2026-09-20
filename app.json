@@ -20,7 +20,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.dojomynigga.GreenBidder"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -33,6 +34,11 @@
           "enableAndroidGpuLibraries": false
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "3a4c5cfb-2c41-458b-b82d-c88dc2ea3977"
+      }
+    }
   }
 }

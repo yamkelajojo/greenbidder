@@ -1,16 +1,51 @@
 {
-  "model_not_ready": true,
-  "_status": "PLACEHOLDER — replace this entire file with the labels.json produced by the Colab pipeline (docs/cabbage-feature/colab). The app reads this file at runtime, so dropping in the real file (same schema) is all that is required. Do NOT hand-edit the class order or preprocessing values: they must come from the empirical inspection of final.keras (Colab cells 4–5).",
-  "input_shape": [1, 384, 384, 3],
+  "input_shape": [
+    1,
+    384,
+    384,
+    3
+  ],
   "preprocessing": "raw_0_255",
   "classes": [
-    { "index": 0, "key": "alternaria_leaf_spot", "label": "Alternaria Leaf Spot" },
-    { "index": 1, "key": "bacterial_leaf_spot", "label": "Bacterial Leaf Spot" },
-    { "index": 2, "key": "black_rot", "label": "Black Rot" },
-    { "index": 3, "key": "clubroot", "label": "Clubroot" },
-    { "index": 4, "key": "downy_mildew", "label": "Downy Mildew" },
-    { "index": 5, "key": "grey_mould", "label": "Grey Mould" },
-    { "index": 6, "key": "healthy", "label": "Healthy" },
-    { "index": 7, "key": "ringspot", "label": "Ringspot" }
+    {
+      "index": 0,
+      "key": "alternaria_leaf_spot",
+      "label": "Alternaria Leaf Spot"
+    },
+    {
+      "index": 1,
+      "key": "bacterial_leaf_spot",
+      "label": "Bacterial Leaf Spot"
+    },
+    {
+      "index": 2,
+      "key": "black_rot",
+      "label": "Black Rot"
+    },
+    {
+      "index": 3,
+      "key": "clubroot",
+      "label": "Clubroot"
+    },
+    {
+      "index": 4,
+      "key": "downy_mildew",
+      "label": "Downy Mildew"
+    },
+    {
+      "index": 5,
+      "key": "grey_mould",
+      "label": "Grey Mould"
+    },
+    {
+      "index": 6,
+      "key": "healthy",
+      "label": "Healthy"
+    },
+    {
+      "index": 7,
+      "key": "ringspot",
+      "label": "Ringspot"
+    }
   ]
 }

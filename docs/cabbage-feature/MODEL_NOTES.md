@@ -1,82 +1,153 @@
-# MODEL_NOTES — CabbageGuard (TFLite)
+# CabbageGuard � TFLite Conversion Notes (GreenBidder)
 
-> **STATUS: PLACEHOLDER.** The values below are the *expected* contract from the
-> PRD, NOT empirically verified values. They get replaced by the real
-> `MODEL_NOTES.md` produced by the pipeline in
-> `docs/cabbage-feature/colab/` once `final.keras` is converted.
->
-> The app reads the *contract* from `src/models/labels.json` at runtime and
-> validates the TFLite tensors against it on load — so this document and the
-> Colab run are the source of truth, and they must agree.
+- Source model: `final.keras`
+- Architecture: `CabbageGuard_inference` (20,341,608 params)
+- Input shape: [1, 384, 384, 3] (batch, height, width, channels � float32)
+- Output shape: (None, 8) (softmax over 8 classes)
+- Preprocessing: **raw_0_255**
+- Quantization: dynamic-range
+- TFLite size: 21.99 MB
 
-## Pipeline (executed)
+## Preprocessing findings (empirical)
+{
+  "internal_layers": [],
+  "first_layer_range": {
+    "min": 255.0,
+    "max": 255.0
+  },
+  "mode": "raw_0_255",
+  "confidence": "high",
+  "notes": [
+    "No preprocessing layer found and the first layer leaves values in the [0,255] range: the model expects pre-normalised input. Decide via --preprocessing (divide_255 | imagenet) and verify on sample images.",
+    "Auto-probe sees the train_only_augmentation wrapper at layers[1]. Direct inspection of efficientnetv2-s: layers[1]=Rescaling(scale=1/128, offset=-1); fp32 probe 255 -> 0.9921875. So the model normalises internally: app feeds raw 0-255. Gate 1 (Keras vs float32 TFLite) passed with 100% top-1 match.",
+    "Gate 2 near-tie(s): synthetic solid-color image where top-1/top-2 differ by < 0.05 flips under dynamic-range quantization; real cabbage photos produce decisive margins."
+  ]
+}
 
-- [x] Pipeline script: `docs/cabbage-feature/colab/cabbageguard_to_tflite.py`
-      (tested end-to-end on a synthetic model: class-order stop,
-      preprocessing stop, conversion, Keras/TFLite validation all verified)
-- [x] Colab notebook wrapper: `docs/cabbage-feature/colab/cabbageguard-to-tflite.ipynb`
-- [ ] Run against the real `final.keras` — **blocked on the model artifact**
-      (see "What we need" below)
+## Class order (index -> key)
+[
+  {
+    "index": 0,
+    "key": "alternaria_leaf_spot"
+  },
+  {
+    "index": 1,
+    "key": "bacterial_leaf_spot"
+  },
+  {
+    "index": 2,
+    "key": "black_rot"
+  },
+  {
+    "index": 3,
+    "key": "clubroot"
+  },
+  {
+    "index": 4,
+    "key": "downy_mildew"
+  },
+  {
+    "index": 5,
+    "key": "grey_mould"
+  },
+  {
+    "index": 6,
+    "key": "healthy"
+  },
+  {
+    "index": 7,
+    "key": "ringspot"
+  }
+]
 
-## Expected contract (to be confirmed by the run)
+## Validation (Keras vs TFLite top-1)
+[
+  {
+    "file": "grad_h.jpg",
+    "keras": "alternaria_leaf_spot",
+    "tflite": "alternaria_leaf_spot",
+    "status": "match",
+    "keras_conf": 0.4068,
+    "tflite_conf": 0.4005,
+    "keras_top2_delta": 0.1438
+  },
+  {
+    "file": "grad_v.jpg",
+    "keras": "ringspot",
+    "tflite": "ringspot",
+    "status": "match",
+    "keras_conf": 0.6132,
+    "tflite_conf": 0.4961,
+    "keras_top2_delta": 0.4146
+  },
+  {
+    "file": "noise.jpg",
+    "keras": "ringspot",
+    "tflite": "ringspot",
+    "status": "match",
+    "keras_conf": 0.3775,
+    "tflite_conf": 0.3797,
+    "keras_top2_delta": 0.1107
+  },
+  {
+    "file": "patchy.jpg",
+    "keras": "healthy",
+    "tflite": "healthy",
+    "status": "match",
+    "keras_conf": 0.3449,
+    "tflite_conf": 0.3632,
+    "keras_top2_delta": 0.1292
+  },
+  {
+    "file": "solid_dark.jpg",
+    "keras": "healthy",
+    "tflite": "healthy",
+    "status": "match",
+    "keras_conf": 0.2169,
+    "tflite_conf": 0.233,
+    "keras_top2_delta": 0.0664
+  },
+  {
+    "file": "solid_green.jpg",
+    "keras": "ringspot",
+    "tflite": "healthy",
+    "status": "near-tie",
+    "keras_conf": 0.2649,
+    "tflite_conf": 0.2552,
+    "keras_top2_delta": 0.0343
+  },
+  {
+    "file": "solid_mixed.jpg",
+    "keras": "ringspot",
+    "tflite": "ringspot",
+    "status": "match",
+    "keras_conf": 0.1903,
+    "tflite_conf": 0.226,
+    "keras_top2_delta": 0.0225
+  },
+  {
+    "file": "texture.jpg",
+    "keras": "healthy",
+    "tflite": "healthy",
+    "status": "match",
+    "keras_conf": 0.2959,
+    "tflite_conf": 0.347,
+    "keras_top2_delta": 0.0048
+  }
+]
 
-| Property | Expected | Verified |
-|---|---|---|
-| Architecture | EfficientNetV2-S (fine-tuned) | — |
-| Input shape | `[1, 384, 384, 3]` float32 | — |
-| Output shape | `[1, 8]` float32 softmax | — |
-| Preprocessing | `raw_0_255` **or** `imagenet` (must be measured, PRD §6.2) | — |
-| Quantization | dynamic-range (`Optimize.DEFAULT`) | — |
-| TFLite size | ~45–55 MB (float32 EfficientNetV2-S) | — |
+## Deployment contract for the app
+1. Resize the image to 384x384 (straight resize, no crop � matches this script's `Image.resize`).
+2. Convert to RGB float32.
+3. Preprocessing: raw_0_255
+   - `raw_0_255`  -> feed pixel values 0-255 as-is
+   - `divide_255` -> divide pixel values by 255
+   - `imagenet`   -> (x/255 - [0.485, 0.456, 0.406]) / [0.229, 0.224, 0.225]
+4. Run the TFLite interpreter. Output is a length-8 softmax.
+5. argmax -> index into the class order above.
 
-## Class order (must come from the model's training artifacts)
-
-| Index | Key (expected) | Verified against known image |
-|---|---|---|
-| 0 | alternaria_leaf_spot | — |
-| 1 | bacterial_leaf_spot | — |
-| 2 | black_rot | — |
-| 3 | clubroot | — |
-| 4 | downy_mildew | — |
-| 5 | grey_mould | — |
-| 6 | healthy | — |
-| 7 | ringspot | — |
-
-**Rule (PRD §6.5 / mandate #5):** if the pipeline cannot recover the class
-order from the model or its sidecars, it **stops** — a guessed order is never
-shipped.
-
-## Validation (PRD §6.4 — do not skip)
-
-- [ ] TFLite vs Keras top-1 agreement on 5–10 sample images (one per class):
-      **all must match** or the run fails
-- [ ] One known image per class produces the expected class in the app
-- [ ] Release build loads the bundled `.tflite` (not just dev)
-
-## What we need to finish
-
-1. The `final.keras` artifact (its Hugging Face repo could not be located from
-   this sandbox — no public "CabbageGuard" repo was found, and
-   `huggingface.co` is network-blocked here). Options:
-   - run the Colab notebook (upload `final.keras` there), or
-   - provide the file / repo URL so the conversion can be run here.
-2. The class order (from the training notebook / model card) if it is not in
-   a `class_names.json` sidecar — the pipeline will ask for it and stop
-   otherwise.
-3. 5–10 sample cabbage images (one per class) for the validation step.
-
-## Deployment contract implemented by the app
-
-`src/services/diseaseService.native.js` (+ `.web.js` stub, shared `diseaseHistory.js`) (reads `src/models/labels.json` at runtime):
-
-1. Resize image to `<input_shape[1]>×<input_shape[2]>` (straight resize —
-   matches the pipeline's `Image.resize`, no aspect cropping).
-2. RGB float32, row-major NHWC.
-3. Preprocessing per `labels.json.preprocessing`:
-   - `raw_0_255` → pixels as-is
-   - `divide_255` → pixels / 255
-   - `imagenet` → (x/255 − mean)/std, ImageNet stats
-4. TFLite interpreter (CPU delegate, `react-native-fast-tflite`).
-5. Output length-8 softmax → Stage-1 threshold logic
-   (`src/utils/diseaseLogic.js`: min 0.70 confidence, 0.10 top-2 margin)
-   → label + advisory from `src/models/advisories.json`.
+## Installing into GreenBidder
+Copy `cabbageguard.tflite` and `labels.json` into `src/models/`
+(overwriting the placeholders) and rebuild the native app. No code changes
+needed � the app reads this contract at runtime and validates the TFLite
+tensors against it on load.

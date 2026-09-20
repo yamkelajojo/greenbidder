@@ -7,7 +7,9 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "check:disease": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-disease-logic.mjs"
+    "check:disease": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-disease-logic.mjs",
+    "check:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-model-contract.mjs",
+    "check:all": "npm run check:disease && npm run check:model"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -21,6 +23,7 @@
     "babel-preset-expo": "~54.0.10",
     "expo": "~54.0.33",
     "expo-constants": "~18.0.13",
+    "expo-dev-client": "~6.0.16",
     "expo-file-system": "~19.0.21",
     "expo-image-manipulator": "~14.0.8",
     "expo-image-picker": "~17.0.10",

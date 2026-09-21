@@ -11,8 +11,10 @@
  * `diseaseHistory.js`.
  */
 
-/** Same error code as the native service. */
+/** Same error codes as the native service. */
 export const MODEL_NOT_READY = "MODEL_NOT_READY";
+export const INFERENCE_TIMEOUT = "INFERENCE_TIMEOUT";
+export const INVALID_IMAGE = "INVALID_IMAGE";
 
 export {
   getScanImageUrl,
@@ -31,6 +33,9 @@ export const getModelMeta = () => ({
   preprocessing: "raw_0_255",
   classes: [],
 });
+
+/** Eager preload is a no-op on web (model can never load). */
+export const preloadModel = () => {};
 
 export const loadModel = () =>
   Promise.reject({

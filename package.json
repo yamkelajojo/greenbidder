@@ -9,7 +9,12 @@
     "web": "expo start --web",
     "check:disease": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-disease-logic.mjs",
     "check:model": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-model-contract.mjs",
-    "check:all": "npm run check:disease && npm run check:model"
+    "check:service": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-disease-service.mjs",
+    "check:preprocess": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-preprocess.mjs",
+    "check:quality": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-image-quality.mjs",
+    "check:animations": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-animations.mjs",
+    "check:audit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-audit.mjs",
+    "check:all": "npm run check:disease && npm run check:model && npm run check:service && npm run check:preprocess && npm run check:quality && npm run check:animations && npm run check:audit"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

@@ -1,31 +1,88 @@
 import React from "react";
-import { View, Text, Image, TouchableOpacity, StyleSheet } from "react-native";
+import {
+  View,
+  Text,
+  Image,
+  TouchableOpacity,
+  StyleSheet,
+  Animated,
+} from "react-native";
 import { colors, spacing, fonts, radius } from "../../config/theme";
 import { timeAgo } from "../../utils/dateUtils";
 import { formatConfidence } from "../../utils/diseaseLogic";
+import { useFadeIn } from "../../utils/animations";
+
+/** Map disease key -> severity bucket. Same mapping as advisories.json
+ *  but we duplicate it here to avoid importing the whole JSON in a
+ *  list-item render path. */
+const SEVERITY_MAP = {
+  healthy: "healthy",
+  alternaria_leaf_spot: "moderate",
+  bacterial_leaf_spot: "moderate",
+  downy_mildew: "moderate",
+  grey_mould: "moderate",
+  ringspot: "moderate",
+  black_rot: "severe",
+  clubroot: "severe",
+};
+
+const SEVERITY_COLORS = {
+  healthy: colors.success,
+  moderate: colors.warning,
+  severe: colors.danger,
+  unknown: colors.textSecondary,
+};
+
+function guessSeverity(key) {
+  return SEVERITY_MAP[key] || (key === "unknown" ? "unknown" : "moderate");
+}
 
 /**
  * One row in the scan-history list: thumbnail, label, confidence, timestamp,
  * and a delete button (PRD §8.2).
  *
+ * Animates in on mount with a subtle fade+slide for a smoother list feel
+ * (consistent with DiseaseScanScreen and DiseaseResultCard).
+ *
  * @param {Object} props
  * @param {Object} props.item - disease_scans row (+ image_url)
+ * @param {number} [props.index=0] - List index for stagger timing
  * @param {function} [props.onDelete] - Called with the row id
  * @param {boolean} [props.isDeleting=false] - Delete in progress for this row
+ * @param {function} [props.onPress] - Optional tap handler (view detail)
  */
-export default function ScanHistoryItem({ item, onDelete, isDeleting = false }) {
-  const isHealthy = item.disease_key === "healthy";
-  const isUnknown = item.disease_key === "unknown";
+export default function ScanHistoryItem({
+  item,
+  index = 0,
+  onDelete,
+  isDeleting = false,
+  onPress,
+}) {
+  const isUnknown = item.disease_key === "unknown" || item.is_cabbage === false;
   const labelColor = isUnknown
-    ? colors.textSecondary
-    : isHealthy
-      ? colors.success
-      : colors.textPrimary;
+    ? SEVERITY_COLORS.unknown
+    : SEVERITY_COLORS[guessSeverity(item.disease_key)] || colors.textPrimary;
 
-  return (
-    <View style={styles.row}>
+  // List-row entrance — quick fade with slight upward drift, delayed by
+  // position so newly added/loaded rows feel like they glide in.
+  const entrance = useFadeIn({
+    duration: 250,
+    translateY: 8,
+    delay: Math.min(index * 40, 200),
+  });
+
+  const content = (
+    <Animated.View
+      style={[
+        styles.row,
+        {
+          opacity: entrance.opacity,
+          transform: [{ translateY: entrance.translateY }],
+        },
+      ]}
+    >
       {item.image_url ? (
-        <Image source={{ uri: item.image_url }} style={styles.thumb} />
+        <Image source={{ uri: item.image_url }} style={styles.thumb} resizeMode="cover" />
       ) : (
         <View style={[styles.thumb, styles.thumbPlaceholder]}>
           <Text style={styles.thumbPlaceholderText}>🥬</Text>
@@ -49,15 +106,34 @@ export default function ScanHistoryItem({ item, onDelete, isDeleting = false }) 
         onPress={() => onDelete && onDelete(item.id)}
         disabled={isDeleting}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        activeOpacity={0.8}
         accessibilityLabel={`Delete scan ${item.disease_label}`}
       >
         <Text style={styles.deleteIcon}>{isDeleting ? "…" : "🗑"}</Text>
       </TouchableOpacity>
-    </View>
+    </Animated.View>
   );
+
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        activeOpacity={0.8}
+        onPress={() => onPress(item)}
+        disabled={isDeleting}
+        style={styles.rowWrapper}
+      >
+        {content}
+      </TouchableOpacity>
+    );
+  }
+
+  return content;
 }
 
 const styles = StyleSheet.create({
+  rowWrapper: {
+    // Touchable wrapper for press feedback on the whole row.
+  },
   row: {
     flexDirection: "row",
     alignItems: "center",

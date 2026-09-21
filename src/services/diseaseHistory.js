@@ -93,11 +93,23 @@ export const saveScan = async (result, imageUri) => {
  * @returns {Promise<{data: Array|null, error: Object|null, hasMore: boolean}>}
  */
 export const getScanHistory = async ({ limit = 10, before = null } = {}) => {
+  // When paginating with .lt(created_at, before), Supabase returns the
+  // count for the *filtered* query (i.e. only older rows), not the total.
+  // So we can't rely on `count > rows.length` across page boundaries.
+  // Instead, we determine hasMore by whether we got a full page back:
+  // if we got exactly `limit` rows, there's probably more; if fewer,
+  // we've reached the end. This avoids a separate count query and is
+  // standard cursor-pagination behavior.
+  //
+  // We still request count: 'exact' on the first page (no `before`) for
+  // a nice initial `hasMore` value; on subsequent pages we derive it
+  // from the returned page length.
+  const useExactCount = !before;
   let query = supabase
     .from("disease_scans")
     .select(
       "id, image_path, disease_key, disease_label, confidence, is_cabbage, advisory, created_at",
-      { count: "exact" }
+      useExactCount ? { count: "exact" } : undefined
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -111,7 +123,19 @@ export const getScanHistory = async ({ limit = 10, before = null } = {}) => {
     ...row,
     image_url: getScanImageUrl(row.image_path),
   }));
-  return { data: rows, error, hasMore: typeof count === "number" && count > rows.length };
+
+  // Fetch one extra row to definitively know whether more pages exist.
+  // That avoids showing "Scroll for more…" forever when we're at the end.
+  // We achieve this cleanly by requesting limit+1 and slicing.
+  //
+  // (Simpler alternative: if we got exactly `limit` rows, assume more.
+  // That's what we do below because the +1 approach complicates the
+  // `before` cursor arithmetic with minimal UX benefit.)
+  const hasMore = useExactCount
+    ? typeof count === "number" && count > rows.length
+    : rows.length >= limit;
+
+  return { data: rows, error, hasMore };
 };
 
 /**

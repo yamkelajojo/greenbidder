@@ -16,9 +16,13 @@ export default function RootNavigator() {
     );
   }
 
+  // TEMP: skip auth for disease-detection testing (Supabase project is paused)
+  // TODO: revert this before shipping
+  const FORCE_AUTH_BYPASS = true;
+
   return (
     <NavigationContainer>
-      {session ? <MainTabs /> : <AuthStack />}
+      {session || FORCE_AUTH_BYPASS ? <MainTabs /> : <AuthStack />}
     </NavigationContainer>
   );
 }

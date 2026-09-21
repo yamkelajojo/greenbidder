@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Camera, ImagePlus } from "@tamagui/lucide-icons-2";
+import * as FileSystem from "expo-file-system/legacy";
 import { colors, spacing, fonts, radius } from "../../config/theme";
 import { pickImage } from "../../services/imageService";
 import {
@@ -118,6 +119,20 @@ export default function DiseaseScanScreen() {
   // Scan flow
   // ------------------------------------------------------------------
   const handlePick = async (source) => {
+    if (source === "debug") {
+      try {
+        const srcUri = "file:///sdcard/Download/cabbage-test.jpg";
+        const destUri = FileSystem.cacheDirectory + "cabbage-test.jpg";
+        await FileSystem.copyAsync({ from: srcUri, to: destUri });
+        setResult(null);
+        setSavedScan(null);
+        setImageUri(destUri);
+        setPhase("preview");
+      } catch (e) {
+        Alert.alert("Debug error", e.message || String(e));
+      }
+      return;
+    }
     const { uri, cancelled, error } = await pickImage(source);
     if (error) {
       Alert.alert("Camera", error);
@@ -384,6 +399,7 @@ function Header() {
 }
 
 function EmptyState({ onPick }) {
+  const debugUri = "file:///sdcard/Download/cabbage-test.jpg";
   return (
     <View style={styles.emptyCard}>
       <Text style={styles.emptyIcon}>🥬</Text>
@@ -401,6 +417,12 @@ function EmptyState({ onPick }) {
         label="Choose from gallery"
         variant="outline"
         onPress={() => onPick("gallery")}
+        style={styles.flowButton}
+      />
+      <AppButton
+        label="Debug: Test inference"
+        variant="outline"
+        onPress={() => onPick("debug")}
         style={styles.flowButton}
       />
     </View>

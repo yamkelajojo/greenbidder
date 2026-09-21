@@ -1,7 +1,7 @@
 import { Platform } from "react-native";
 import { loadTensorflowModel } from "react-native-fast-tflite";
 import * as ImageManipulator from "expo-image-manipulator";
-import { readAsStringAsync } from "expo-file-system";
+import { readAsStringAsync } from "expo-file-system/legacy";
 import jpeg from "jpeg-js";
 import { interpretOutput } from "../utils/diseaseLogic";
 import { base64ToArrayBuffer } from "../utils/binaryUtils";
